@@ -1,0 +1,308 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Country {
+  id           String       @id @default(cuid())
+  name         String       @unique
+  code         String       @unique
+  locationType String       @default("OVERSEAS")
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  divisions           Division[]
+  branches            Branch[]
+  users               User[]
+  mrfs                MRF[]
+  countryAssignments  UserCountryAssignment[]
+}
+
+model Division {
+  id        String   @id @default(cuid())
+  name      String
+  countryId String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  country Country  @relation(fields: [countryId], references: [id])
+  states  State[]
+  mrfs    MRF[]
+
+  @@unique([name, countryId])
+}
+
+model State {
+  id         String   @id @default(cuid())
+  name       String
+  divisionId String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  division Division @relation(fields: [divisionId], references: [id])
+  branches Branch[]
+
+  @@unique([name, divisionId])
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  countryId String
+  stateId   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  country Country  @relation(fields: [countryId], references: [id])
+  state   State?   @relation(fields: [stateId], references: [id])
+  users   User[]
+  mrfs    MRF[]
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  mrfs                   MRF[]
+  functionalHeadMappings DepartmentFunctionalHead[]
+  designations           Designation[]
+}
+
+model DepartmentFunctionalHead {
+  id           String  @id @default(cuid())
+  departmentId String
+  userId       String
+  countryId    String?
+  stateId      String?
+
+  department Department @relation(fields: [departmentId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@unique([departmentId, userId])
+}
+
+model Designation {
+  id                   String  @id @default(cuid())
+  title                String  @unique
+  departmentId         String
+  requiresPsychometric Boolean @default(false)
+  isActive             Boolean @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id])
+  mrfs       MRF[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("CANDIDATE")
+  branchId  String?
+  countryId String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch  Branch?  @relation(fields: [branchId], references: [id])
+  country Country? @relation(fields: [countryId], references: [id])
+
+  sessions               Session[]
+  accounts               Account[]
+  createdMRFs            MRF[]                    @relation("MRFCreator")
+  functionalHeadOf       DepartmentFunctionalHead[]
+  countryAssignments     UserCountryAssignment[]
+  candidateProfile       Candidate?
+  mrfApprovalRecords     MRFApprovalRecord[]      @relation("ApproverRecords")
+  recordedApprovals      MRFApprovalRecord[]      @relation("RecorderRecords")
+  uploadedDocuments      Document[]               @relation("UploadedBy")
+  interviews             InterviewRecord[]
+}
+
+model UserCountryAssignment {
+  id        String @id @default(cuid())
+  userId    String
+  countryId String
+
+  user    User    @relation(fields: [userId], references: [id])
+  country Country @relation(fields: [countryId], references: [id])
+
+  @@unique([userId, countryId])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model MRF {
+  id              String    @id @default(cuid())
+  mrfNumber       String    @unique
+  title           String
+  countryId       String
+  divisionId      String?
+  branchId        String
+  departmentId    String
+  designationId   String?
+  vacancyCount    Int       @default(1)
+  justification   String?
+  status          String    @default("DRAFT")
+  createdById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  country     Country      @relation(fields: [countryId], references: [id])
+  division    Division?    @relation(fields: [divisionId], references: [id])
+  branch      Branch       @relation(fields: [branchId], references: [id])
+  department  Department   @relation(fields: [departmentId], references: [id])
+  designation Designation? @relation(fields: [designationId], references: [id])
+  createdBy   User         @relation("MRFCreator", fields: [createdById], references: [id])
+
+  approvalRecords MRFApprovalRecord[]
+  candidates      Candidate[]
+  documents       Document[]
+}
+
+model MRFApprovalRecord {
+  id           String   @id @default(cuid())
+  mrfId        String
+  level        String
+  approverId   String?
+  approverName String
+  status       String   @default("PENDING")
+  notes        String?
+  recordedById String
+  recordedAt   DateTime @default(now())
+  documentId   String?
+
+  mrf        MRF       @relation(fields: [mrfId], references: [id])
+  approver   User?     @relation("ApproverRecords", fields: [approverId], references: [id])
+  recordedBy User      @relation("RecorderRecords", fields: [recordedById], references: [id])
+  document   Document? @relation(fields: [documentId], references: [id])
+}
+
+model Candidate {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  mrfId        String?
+  firstName    String
+  lastName     String
+  email        String   @unique
+  phone        String?
+  currentStage String   @default("APPLIED")
+  aiScore      Float?
+  aiScoreNotes String?
+  resumeUrl    String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User                    @relation(fields: [userId], references: [id])
+  mrf          MRF?                    @relation(fields: [mrfId], references: [id])
+  stageHistory CandidateStageHistory[]
+  interviews   InterviewRecord[]
+  documents    Document[]
+  offerDetail  OfferDetail?
+}
+
+model CandidateStageHistory {
+  id          String   @id @default(cuid())
+  candidateId String
+  fromStage   String?
+  toStage     String
+  notes       String?
+  changedAt   DateTime @default(now())
+
+  candidate Candidate @relation(fields: [candidateId], references: [id])
+}
+
+model InterviewRecord {
+  id            String    @id @default(cuid())
+  candidateId   String
+  interviewerId String
+  scheduledAt   DateTime
+  completedAt   DateTime?
+  result        String?
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  candidate   Candidate @relation(fields: [candidateId], references: [id])
+  interviewer User      @relation(fields: [interviewerId], references: [id])
+}
+
+model OfferDetail {
+  id             String    @id @default(cuid())
+  candidateId    String    @unique
+  offeredSalary  Float?
+  offeredAt      DateTime  @default(now())
+  acceptedAt     DateTime?
+  probationEndAt DateTime?
+  notes          String?
+
+  candidate Candidate @relation(fields: [candidateId], references: [id])
+}
+
+model Document {
+  id           String   @id @default(cuid())
+  name         String
+  fileUrl      String
+  fileType     String
+  fileSize     Int
+  documentType String   @default("OTHER")
+  uploadedById String
+  candidateId  String?
+  mrfId        String?
+  createdAt    DateTime @default(now())
+
+  uploadedBy      User               @relation("UploadedBy", fields: [uploadedById], references: [id])
+  candidate       Candidate?         @relation(fields: [candidateId], references: [id])
+  mrf             MRF?               @relation(fields: [mrfId], references: [id])
+  approvalRecords MRFApprovalRecord[]
+}
