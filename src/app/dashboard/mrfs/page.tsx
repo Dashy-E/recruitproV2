@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, ClipboardList, Users } from "lucide-react";
+import { Plus, Search, ClipboardList, Users, Bell } from "lucide-react";
 import { formatDate, MRF_STATUSES } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 
@@ -18,7 +18,7 @@ interface MRF {
   vacancyCount: number;
   createdAt: string;
   country: { name: string };
-  branch: { name: string };
+  branch: { name: string } | null;
   department: { name: string };
   createdBy: { name: string };
   _count: { candidates: number };
@@ -33,6 +33,12 @@ const STATUS_COLORS: Record<string, string> = {
   REJECTED: "destructive",
 };
 
+const MANAGER_PENDING: Record<string, string> = {
+  DIVISIONAL_MANAGER: "PENDING_DIVISIONAL",
+  FUNCTIONAL_HEAD: "PENDING_FUNCTIONAL",
+  COUNTRY_MANAGER: "PENDING_COUNTRY",
+};
+
 export default function MRFsPage() {
   const { data: session } = useSession();
   const role = (session?.user as { role?: string })?.role || "";
@@ -41,11 +47,13 @@ export default function MRFsPage() {
   const [loading, setLoading] = useState(true);
 
   const canCreate = ["ADMIN", "HR", "BRANCH_MANAGER"].includes(role);
+  const myPendingStatus = MANAGER_PENDING[role];
+  const pendingForMe = myPendingStatus ? mrfs.filter((m) => m.status === myPendingStatus) : [];
 
   useEffect(() => {
     fetch("/api/mrfs")
       .then((r) => r.json())
-      .then((data) => { setMrfs(data); setLoading(false); });
+      .then((data) => { setMrfs(Array.isArray(data) ? data : []); setLoading(false); });
   }, []);
 
   const filtered = mrfs.filter(
@@ -53,7 +61,37 @@ export default function MRFsPage() {
       m.title.toLowerCase().includes(search.toLowerCase()) ||
       m.mrfNumber.toLowerCase().includes(search.toLowerCase()) ||
       m.department.name.toLowerCase().includes(search.toLowerCase()) ||
-      m.branch.name.toLowerCase().includes(search.toLowerCase())
+      (m.branch?.name || "").toLowerCase().includes(search.toLowerCase())
+  );
+
+  const MRFRow = ({ mrf }: { mrf: MRF }) => (
+    <TableRow>
+      <TableCell className="font-mono text-xs">{mrf.mrfNumber}</TableCell>
+      <TableCell className="font-medium">{mrf.title}</TableCell>
+      <TableCell>
+        <p className="text-sm">{mrf.country.name}</p>
+        <p className="text-xs text-gray-500">{mrf.branch?.name || "—"}</p>
+      </TableCell>
+      <TableCell>{mrf.department.name}</TableCell>
+      <TableCell className="text-center">{mrf.vacancyCount}</TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1">
+          <Users className="h-3 w-3 text-gray-400" />
+          <span>{mrf._count.candidates}</span>
+        </div>
+      </TableCell>
+      <TableCell>
+        <Badge variant={STATUS_COLORS[mrf.status] as "secondary" | "warning" | "success" | "destructive" | "default" | "outline"}>
+          {MRF_STATUSES[mrf.status as keyof typeof MRF_STATUSES]?.label || mrf.status}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-sm text-gray-500">{formatDate(mrf.createdAt)}</TableCell>
+      <TableCell>
+        <Link href={`/dashboard/mrfs/${mrf.id}`} className="text-sm text-blue-600 hover:underline">
+          View
+        </Link>
+      </TableCell>
+    </TableRow>
   );
 
   return (
@@ -73,6 +111,39 @@ export default function MRFsPage() {
         )}
       </div>
 
+      {/* Pending approval banner for managers */}
+      {pendingForMe.length > 0 && (
+        <Card className="border-orange-200 bg-orange-50">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-orange-800 text-base">
+              <Bell className="h-5 w-5" />
+              {pendingForMe.length} MRF{pendingForMe.length > 1 ? "s" : ""} awaiting your approval
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>MRF Number</TableHead>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Country / Branch</TableHead>
+                  <TableHead>Department</TableHead>
+                  <TableHead>Vacancies</TableHead>
+                  <TableHead>Candidates</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pendingForMe.map((mrf) => <MRFRow key={mrf.id} mrf={mrf} />)}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Status summary */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {Object.entries(MRF_STATUSES).map(([key, val]) => (
           <Card key={key}>
@@ -127,35 +198,7 @@ export default function MRFsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((mrf) => (
-                  <TableRow key={mrf.id}>
-                    <TableCell className="font-mono text-xs">{mrf.mrfNumber}</TableCell>
-                    <TableCell className="font-medium">{mrf.title}</TableCell>
-                    <TableCell>
-                      <p className="text-sm">{mrf.country.name}</p>
-                      <p className="text-xs text-gray-500">{mrf.branch.name}</p>
-                    </TableCell>
-                    <TableCell>{mrf.department.name}</TableCell>
-                    <TableCell className="text-center">{mrf.vacancyCount}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Users className="h-3 w-3 text-gray-400" />
-                        <span>{mrf._count.candidates}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={STATUS_COLORS[mrf.status] as "secondary" | "warning" | "success" | "destructive" | "default" | "outline"}>
-                        {MRF_STATUSES[mrf.status as keyof typeof MRF_STATUSES]?.label || mrf.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-500">{formatDate(mrf.createdAt)}</TableCell>
-                    <TableCell>
-                      <Link href={`/dashboard/mrfs/${mrf.id}`} className="text-sm text-blue-600 hover:underline">
-                        View
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {filtered.map((mrf) => <MRFRow key={mrf.id} mrf={mrf} />)}
               </TableBody>
             </Table>
           )}

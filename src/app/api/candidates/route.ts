@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     },
     include: {
       user: { select: { name: true, email: true } },
-      mrf: { include: { department: true, branch: true } },
+      mrf: { include: { department: true, branch: { include: { state: true, country: true } }, country: true } },
       stageHistory: { orderBy: { changedAt: "desc" } },
     },
     orderBy: { createdAt: "desc" },

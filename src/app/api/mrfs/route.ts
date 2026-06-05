@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { title, countryId, divisionId, branchId, departmentId, designationId, vacancyCount, justification } = body;
 
-  if (!title || !countryId || !branchId || !departmentId) {
+  if (!title || !countryId || !departmentId) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 

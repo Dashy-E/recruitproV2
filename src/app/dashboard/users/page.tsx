@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,7 @@ interface User {
 }
 interface Branch { id: string; name: string; code: string }
 interface Country { id: string; name: string }
+interface Department { id: string; name: string }
 
 const ROLE_COLORS: Record<string, string> = {
   ADMIN: "bg-purple-100 text-purple-700",
@@ -28,15 +30,31 @@ const ROLE_COLORS: Record<string, string> = {
   CANDIDATE: "bg-gray-100 text-gray-700",
 };
 
+const ROLE_HINTS: Record<string, string> = {
+  HR: "Assign a country or branch",
+  BRANCH_MANAGER: "Assign a branch (required)",
+  DIVISIONAL_MANAGER: "Assign a country",
+  FUNCTIONAL_HEAD: "Assign a department + country",
+  COUNTRY_MANAGER: "Assign a country",
+};
+
 export default function UsersPage() {
+  const { data: session } = useSession();
+  const myRole = (session?.user as { role?: string })?.role || "";
+
   const [users, setUsers] = useState<User[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", password: "", userRole: "HR", branchId: "", countryId: "" });
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({
+    name: "", email: "", password: "", userRole: "HR",
+    branchId: "", countryId: "", departmentId: "",
+  });
 
   const fetchUsers = () => {
     fetch("/api/users").then((r) => r.json()).then((d) => { setUsers(Array.isArray(d) ? d : []); setLoading(false); });
@@ -46,24 +64,41 @@ export default function UsersPage() {
     fetchUsers();
     fetch("/api/org/countries").then((r) => r.json()).then(setCountries);
     fetch("/api/org/branches").then((r) => r.json()).then(setBranches);
+    fetch("/api/org/departments").then((r) => r.json()).then(setDepartments);
   }, []);
 
   const filtered = users.filter(
     (u) => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase())
   );
 
+  // Roles HR can create (no ADMIN, no CANDIDATE)
+  const creatableRoles = Object.entries(USER_ROLES).filter(([k]) => {
+    if (k === "CANDIDATE") return false;
+    if (k === "ADMIN" && myRole !== "ADMIN") return false;
+    return true;
+  });
+
   const handleAdd = async () => {
+    setError("");
     setSubmitting(true);
-    await fetch("/api/users", {
+    const res = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
     setSubmitting(false);
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error || "Failed to create user.");
+      return;
+    }
     setShowAdd(false);
-    setForm({ name: "", email: "", password: "", userRole: "HR", branchId: "", countryId: "" });
+    setForm({ name: "", email: "", password: "", userRole: "HR", branchId: "", countryId: "", departmentId: "" });
     fetchUsers();
   };
+
+  const needsDept = form.userRole === "FUNCTIONAL_HEAD";
+  const needsBranch = form.userRole === "BRANCH_MANAGER";
 
   return (
     <div className="space-y-6">
@@ -143,57 +178,84 @@ export default function UsersPage() {
       </Card>
 
       {/* Add User Dialog */}
-      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+      <Dialog open={showAdd} onOpenChange={(open) => { setShowAdd(open); setError(""); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Add New User</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Full Name *</Label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Ravi Patel" />
             </div>
             <div className="space-y-2">
               <Label>Email *</Label>
-              <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="ravi@company.com" />
             </div>
             <div className="space-y-2">
               <Label>Password *</Label>
-              <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+              <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Min 6 characters" />
             </div>
             <div className="space-y-2">
               <Label>Role *</Label>
-              <Select value={form.userRole} onValueChange={(v) => setForm({ ...form, userRole: v })}>
+              <Select value={form.userRole} onValueChange={(v) => setForm({ ...form, userRole: v, departmentId: "", branchId: "", countryId: "" })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(USER_ROLES).filter(([k]) => k !== "ADMIN" && k !== "CANDIDATE").map(([key, label]) => (
+                  {creatableRoles.map(([key, label]) => (
                     <SelectItem key={key} value={key}>{label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {ROLE_HINTS[form.userRole] && (
+                <p className="text-xs text-gray-500">{ROLE_HINTS[form.userRole]}</p>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-4">
+
+            {needsDept && (
               <div className="space-y-2">
-                <Label>Branch</Label>
-                <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
+                <Label>Department *</Label>
+                <Select value={form.departmentId} onValueChange={(v) => setForm({ ...form, departmentId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
                   <SelectContent>
-                    {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label>Country</Label>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              {needsBranch && (
+                <div className="space-y-2 col-span-2">
+                  <Label>Branch *</Label>
+                  <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
+                    <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                    <SelectContent>
+                      {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.code})</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="space-y-2 col-span-2">
+                <Label>Country{!needsBranch ? " (optional)" : ""}</Label>
                 <Select value={form.countryId} onValueChange={(v) => setForm({ ...form, countryId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Select country" /></SelectTrigger>
                   <SelectContent>
                     {countries.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
+
+            {error && <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">{error}</div>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-            <Button onClick={handleAdd} disabled={!form.name || !form.email || !form.password || submitting}>
+            <Button
+              onClick={handleAdd}
+              disabled={
+                !form.name || !form.email || !form.password || submitting ||
+                (needsDept && !form.departmentId) ||
+                (needsBranch && !form.branchId)
+              }
+            >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
               Create User
             </Button>

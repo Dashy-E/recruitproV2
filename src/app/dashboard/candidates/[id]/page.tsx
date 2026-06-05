@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -9,9 +9,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, ChevronRight, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Loader2, Upload, FileText, CheckCircle, XCircle, Clock } from "lucide-react";
 import { CANDIDATE_STAGES, formatDate } from "@/lib/utils";
 import { useSession } from "next-auth/react";
+
+interface Document {
+  id: string; name: string; documentType: string; fileUrl: string;
+  approvalStatus: string; approvalNotes: string | null; createdAt: string;
+  uploadedBy: { name: string };
+}
 
 interface CandidateDetail {
   id: string; firstName: string; lastName: string; email: string; phone: string | null;
@@ -22,16 +28,26 @@ interface CandidateDetail {
   documents: { id: string; name: string; documentType: string; createdAt: string }[];
 }
 
+const APPROVAL_BADGE: Record<string, { label: string; icon: React.ElementType; cls: string }> = {
+  PENDING: { label: "Pending", icon: Clock, cls: "text-yellow-600 bg-yellow-50" },
+  APPROVED: { label: "Approved", icon: CheckCircle, cls: "text-green-600 bg-green-50" },
+  REJECTED: { label: "Rejected", icon: XCircle, cls: "text-red-600 bg-red-50" },
+};
+
 export default function CandidateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: session } = useSession();
   const role = (session?.user as { role?: string })?.role || "";
   const [candidate, setCandidate] = useState<CandidateDetail | null>(null);
+  const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [stageDialog, setStageDialog] = useState(false);
   const [toStage, setToStage] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [docType, setDocType] = useState("RECRUITMENT");
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const canManage = ["ADMIN", "HR"].includes(role);
 
@@ -41,7 +57,13 @@ export default function CandidateDetailPage() {
       .then((d) => { setCandidate(d); setLoading(false); });
   };
 
-  useEffect(() => { fetchCandidate(); }, [id]);
+  const fetchDocs = () => {
+    fetch(`/api/documents?candidateId=${id}`)
+      .then((r) => r.json())
+      .then((d) => setDocuments(Array.isArray(d) ? d : []));
+  };
+
+  useEffect(() => { fetchCandidate(); fetchDocs(); }, [id]);
 
   const handleStageChange = async () => {
     setSubmitting(true);
@@ -59,6 +81,29 @@ export default function CandidateDetailPage() {
       const data = await res.json();
       alert(data.error || "Failed to update stage.");
     }
+  };
+
+  const handleUpload = async () => {
+    const file = fileRef.current?.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("documentType", docType);
+    fd.append("candidateId", id);
+    await fetch("/api/documents", { method: "POST", body: fd });
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+    fetchDocs();
+  };
+
+  const handleApproval = async (docId: string, approvalStatus: string) => {
+    await fetch(`/api/documents/${docId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approvalStatus }),
+    });
+    fetchDocs();
   };
 
   if (loading) return <div className="py-20 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin" /></div>;
@@ -197,6 +242,69 @@ export default function CandidateDetailPage() {
                       {h.notes && <p className="text-xs text-gray-500 mt-0.5 italic">"{h.notes}"</p>}
                     </div>
                     <span className="text-xs text-gray-400 shrink-0">{formatDate(h.changedAt)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Documents */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Documents</CardTitle>
+            {canManage && (
+              <div className="flex items-center gap-2">
+                <Select value={docType} onValueChange={setDocType}>
+                  <SelectTrigger className="h-8 w-40 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["IDENTIFICATION", "RECRUITMENT", "ONBOARDING", "OTHER"].map((t) => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <input ref={fileRef} type="file" className="hidden" onChange={handleUpload} />
+                <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading}>
+                  {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                  Upload
+                </Button>
+              </div>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {documents.length === 0 ? (
+            <p className="text-sm text-gray-500">No documents uploaded yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {documents.map((doc) => {
+                const info = APPROVAL_BADGE[doc.approvalStatus] || APPROVAL_BADGE.PENDING;
+                const Icon = info.icon;
+                return (
+                  <div key={doc.id} className="flex items-center gap-3 rounded-lg border p-3">
+                    <FileText className="h-5 w-5 text-gray-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                        className="text-sm font-medium text-blue-600 hover:underline truncate block">
+                        {doc.name}
+                      </a>
+                      <p className="text-xs text-gray-400">{doc.documentType} · by {doc.uploadedBy.name} · {formatDate(doc.createdAt)}</p>
+                      {doc.approvalNotes && <p className="text-xs text-gray-500 italic mt-0.5">"{doc.approvalNotes}"</p>}
+                    </div>
+                    <div className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${info.cls}`}>
+                      <Icon className="h-3 w-3" />
+                      {info.label}
+                    </div>
+                    {canManage && doc.approvalStatus === "PENDING" && (
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="h-7 text-green-600 hover:text-green-700 text-xs px-2"
+                          onClick={() => handleApproval(doc.id, "APPROVED")}>Approve</Button>
+                        <Button size="sm" variant="ghost" className="h-7 text-red-600 hover:text-red-700 text-xs px-2"
+                          onClick={() => handleApproval(doc.id, "REJECTED")}>Reject</Button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

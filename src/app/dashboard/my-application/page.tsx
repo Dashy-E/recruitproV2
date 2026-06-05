@@ -1,35 +1,105 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
-import { redirect } from "next/navigation";
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CANDIDATE_STAGES, formatDate } from "@/lib/utils";
-import { CheckCircle, Clock, ChevronRight } from "lucide-react";
+import { CheckCircle, Clock, Upload, Loader2, FileText, XCircle } from "lucide-react";
 
-export default async function MyApplicationPage() {
-  const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+interface StageHistory { id: string; toStage: string; notes: string | null; changedAt: string }
+interface Document {
+  id: string; name: string; documentType: string; fileUrl: string;
+  approvalStatus: string; approvalNotes: string | null; createdAt: string;
+}
+interface OfferDetail { offeredSalary: number | null; offeredAt: string; probationEndAt: string | null; notes: string | null }
+interface CandidateData {
+  id: string; firstName: string; lastName: string; currentStage: string;
+  aiScore: number | null;
+  mrf: {
+    title: string;
+    department: { name: string };
+    branch: { name: string };
+    country: { name: string };
+    designation: { title: string; requiresPsychometric: boolean } | null;
+  } | null;
+  stageHistory: StageHistory[];
+  documents: Document[];
+  offerDetail: OfferDetail | null;
+}
+
+const PRE_SHORTLIST_STAGES = ["APPLIED", "AI_SCREENING"];
+
+const APPROVAL_ICON: Record<string, React.ElementType> = {
+  PENDING: Clock,
+  APPROVED: CheckCircle,
+  REJECTED: XCircle,
+};
+const APPROVAL_CLS: Record<string, string> = {
+  PENDING: "text-yellow-600",
+  APPROVED: "text-green-600",
+  REJECTED: "text-red-600",
+};
+
+export default function MyApplicationPage() {
+  const { data: session, status } = useSession();
   const userId = (session?.user as { id?: string })?.id;
 
-  if (role !== "CANDIDATE") redirect("/dashboard");
+  const [candidate, setCandidate] = useState<CandidateData | null>(null);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [docType, setDocType] = useState("IDENTIFICATION");
+  const [uploadError, setUploadError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const candidate = await prisma.candidate.findFirst({
-    where: { userId },
-    include: {
-      mrf: {
-        include: {
-          country: true,
-          branch: true,
-          department: true,
-          designation: true,
-        },
-      },
-      stageHistory: { orderBy: { changedAt: "asc" } },
-      documents: true,
-      offerDetail: true,
-    },
-  });
+  const fetchCandidate = async () => {
+    if (!userId) return;
+    const res = await fetch("/api/candidates/me");
+    if (res.ok) {
+      const data = await res.json();
+      setCandidate(data);
+      setDocuments(data.documents || []);
+    }
+    setLoading(false);
+  };
+
+  const fetchDocs = async () => {
+    if (!candidate) return;
+    const res = await fetch(`/api/documents?candidateId=${candidate.id}`);
+    if (res.ok) setDocuments(await res.json());
+  };
+
+  useEffect(() => {
+    if (status === "authenticated") fetchCandidate();
+  }, [status, userId]);
+
+  const canUpload = candidate && PRE_SHORTLIST_STAGES.includes(candidate.currentStage);
+
+  const handleUpload = async () => {
+    const file = fileRef.current?.files?.[0];
+    if (!file || !candidate) return;
+    setUploadError("");
+    setUploading(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("documentType", docType);
+    fd.append("candidateId", candidate.id);
+    const res = await fetch("/api/documents", { method: "POST", body: fd });
+    setUploading(false);
+    if (!res.ok) {
+      const data = await res.json();
+      setUploadError(data.error || "Upload failed.");
+    } else {
+      if (fileRef.current) fileRef.current.value = "";
+      fetchDocs();
+    }
+  };
+
+  if (status === "loading" || loading) {
+    return <div className="py-20 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin" /></div>;
+  }
 
   if (!candidate) {
     return (
@@ -98,6 +168,73 @@ export default async function MyApplicationPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Document Upload (only before SHORTLISTED) */}
+      <Card className={canUpload ? "border-blue-200" : ""}>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>My Documents</CardTitle>
+            {canUpload && (
+              <div className="flex items-center gap-2">
+                <Select value={docType} onValueChange={setDocType}>
+                  <SelectTrigger className="h-8 w-36 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["IDENTIFICATION", "RECRUITMENT", "OTHER"].map((t) => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <input ref={fileRef} type="file" className="hidden" onChange={handleUpload} />
+                <Button size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
+                  {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                  Upload
+                </Button>
+              </div>
+            )}
+          </div>
+          {canUpload && (
+            <p className="text-xs text-blue-600 mt-1">
+              You can upload documents now. HR will review and approve them before shortlisting.
+            </p>
+          )}
+          {!canUpload && (
+            <p className="text-xs text-gray-500 mt-1">
+              Document uploads are closed once you reach the Shortlisted stage. Contact HR for any changes.
+            </p>
+          )}
+        </CardHeader>
+        <CardContent>
+          {uploadError && (
+            <div className="mb-3 rounded-md bg-red-50 p-2 text-xs text-red-600">{uploadError}</div>
+          )}
+          {documents.length === 0 ? (
+            <p className="text-sm text-gray-500">No documents uploaded yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {documents.map((doc) => {
+                const Icon = APPROVAL_ICON[doc.approvalStatus] || Clock;
+                return (
+                  <div key={doc.id} className="flex items-center gap-3 rounded-lg border p-3">
+                    <FileText className="h-5 w-5 text-gray-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                        className="text-sm font-medium text-blue-600 hover:underline truncate block">
+                        {doc.name}
+                      </a>
+                      <p className="text-xs text-gray-400">{doc.documentType} · {formatDate(doc.createdAt)}</p>
+                      {doc.approvalNotes && <p className="text-xs text-gray-500 italic">"{doc.approvalNotes}"</p>}
+                    </div>
+                    <div className={`flex items-center gap-1 text-xs font-medium ${APPROVAL_CLS[doc.approvalStatus] || "text-gray-500"}`}>
+                      <Icon className="h-4 w-4" />
+                      {doc.approvalStatus}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Recruitment Pipeline */}
       <Card>
@@ -189,15 +326,6 @@ export default async function MyApplicationPage() {
           </CardContent>
         </Card>
       )}
-
-      {/* Important Notice */}
-      <Card className="border-blue-200 bg-blue-50">
-        <CardContent className="pt-4 pb-4">
-          <p className="text-sm text-blue-700">
-            <strong>Note:</strong> If you need to update any submitted information or documents, please contact HR directly. Candidates cannot modify submitted data through this portal.
-          </p>
-        </CardContent>
-      </Card>
     </div>
   );
 }

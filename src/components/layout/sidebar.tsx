@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import {
   LayoutDashboard, FileText, Users, Building2, Globe, Settings,
@@ -62,7 +62,7 @@ const navItems: NavItem[] = [
     label: "Users",
     href: "/dashboard/users",
     icon: Users,
-    roles: ["ADMIN"],
+    roles: ["ADMIN", "HR"],
   },
   {
     label: "Settings",
@@ -80,9 +80,16 @@ const navItems: NavItem[] = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { data: session } = useSession();
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
   const role = (session?.user as { role?: string })?.role || "";
+
+  const handleSignOut = async () => {
+    await signOut({ redirect: false });
+    router.push("/login");
+    router.refresh();
+  };
 
   const visibleItems = navItems.filter(
     (item) => !item.roles || item.roles.includes(role)
@@ -103,7 +110,9 @@ export default function Sidebar() {
         <ul className="space-y-1">
           {visibleItems.map((item) => {
             const Icon = item.icon;
-            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+            const isActive = item.href === "/dashboard"
+              ? pathname === "/dashboard"
+              : pathname === item.href || pathname.startsWith(item.href + "/");
             const hasChildren = item.children && item.children.length > 0;
             const isOpen = openMenus[item.label];
 
@@ -169,7 +178,7 @@ export default function Sidebar() {
           </span>
         </div>
         <button
-          onClick={() => signOut({ callbackUrl: "/login" })}
+          onClick={handleSignOut}
           className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
         >
           <LogOut className="h-4 w-4" />

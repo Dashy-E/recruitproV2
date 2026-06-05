@@ -17,7 +17,12 @@ import { Suspense } from "react";
 interface Candidate {
   id: string; firstName: string; lastName: string; email: string; phone: string | null;
   currentStage: string; aiScore: number | null; createdAt: string;
-  mrf: { id: string; title: string; department: { name: string }; branch: { name: string } } | null;
+  mrf: {
+    id: string; title: string;
+    department: { name: string };
+    branch: { name: string; state: { name: string } | null; country: { name: string } } | null;
+    country: { name: string };
+  } | null;
 }
 
 interface MRF { id: string; mrfNumber: string; title: string }
@@ -156,7 +161,13 @@ function CandidatesContent() {
                         {c.mrf ? (
                           <>
                             <p className="text-sm font-medium">{c.mrf.title}</p>
-                            <p className="text-xs text-gray-500">{c.mrf.department.name} · {c.mrf.branch.name}</p>
+                            <p className="text-xs text-gray-500">
+                              {c.mrf.department.name}
+                              {c.mrf.branch
+                                ? ` · ${c.mrf.branch.name}${c.mrf.branch.state ? `, ${c.mrf.branch.state.name}` : ""}`
+                                : ""}
+                              {" · "}{c.mrf.country.name}
+                            </p>
                           </>
                         ) : "—"}
                       </TableCell>

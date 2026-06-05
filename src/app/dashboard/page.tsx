@@ -203,7 +203,7 @@ export default async function DashboardPage() {
                   <div className="flex items-center gap-3 rounded-lg border border-gray-100 p-3 hover:bg-gray-50 transition-colors">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{mrf.title}</p>
-                      <p className="text-xs text-gray-500">{mrf.mrfNumber} · {mrf.department.name} · {mrf.branch.name}</p>
+                      <p className="text-xs text-gray-500">{mrf.mrfNumber} · {mrf.department.name}{mrf.branch ? ` · ${mrf.branch.name}` : ""}</p>
                     </div>
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium
                       ${mrf.status === "APPROVED" ? "bg-green-100 text-green-700" :

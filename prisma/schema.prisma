@@ -185,7 +185,7 @@ model MRF {
   title           String
   countryId       String
   divisionId      String?
-  branchId        String
+  branchId        String?
   departmentId    String
   designationId   String?
   vacancyCount    Int       @default(1)
@@ -200,7 +200,7 @@ model MRF {
 
   country     Country      @relation(fields: [countryId], references: [id])
   division    Division?    @relation(fields: [divisionId], references: [id])
-  branch      Branch       @relation(fields: [branchId], references: [id])
+  branch      Branch?      @relation(fields: [branchId], references: [id])
   department  Department   @relation(fields: [departmentId], references: [id])
   designation Designation? @relation(fields: [designationId], references: [id])
   createdBy   User         @relation("MRFCreator", fields: [createdById], references: [id])
@@ -290,16 +290,18 @@ model OfferDetail {
 }
 
 model Document {
-  id           String   @id @default(cuid())
-  name         String
-  fileUrl      String
-  fileType     String
-  fileSize     Int
-  documentType String   @default("OTHER")
-  uploadedById String
-  candidateId  String?
-  mrfId        String?
-  createdAt    DateTime @default(now())
+  id             String    @id @default(cuid())
+  name           String
+  fileUrl        String
+  fileType       String
+  fileSize       Int
+  documentType   String    @default("OTHER")
+  uploadedById   String
+  candidateId    String?
+  mrfId          String?
+  approvalStatus String    @default("PENDING")
+  approvalNotes  String?
+  createdAt      DateTime  @default(now())
 
   uploadedBy      User               @relation("UploadedBy", fields: [uploadedById], references: [id])
   candidate       Candidate?         @relation(fields: [candidateId], references: [id])

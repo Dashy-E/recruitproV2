@@ -39,10 +39,13 @@ export default function NewMRFPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const countryType = countries.find((c) => c.id === selectedCountry)?.locationType;
-  const isIndia = countryType === "INDIA";
-  const isOverseas = countryType === "OVERSEAS";
-  const isCorporate = countryType === "CORPORATE";
+  const countryObj = countries.find((c) => c.id === selectedCountry);
+  const isIndia = countryObj?.locationType === "INDIA";
+  const isOverseas = countryObj?.locationType === "OVERSEAS";
+  const isCorporate = countryObj?.locationType === "CORPORATE";
+
+  // Overseas countries have no branches — only country-level offices
+  const needsBranch = isIndia || isCorporate;
 
   const designations = departments.find((d) => d.id === selectedDepartment)?.designations || [];
 
@@ -59,11 +62,12 @@ export default function NewMRFPage() {
     if (isIndia) {
       fetch(`/api/org/divisions?countryId=${selectedCountry}`)
         .then((r) => r.json()).then(setDivisions);
-    } else {
+    } else if (isCorporate) {
       fetch(`/api/org/branches?countryId=${selectedCountry}`)
         .then((r) => r.json()).then(setBranches);
     }
-  }, [selectedCountry, isIndia]);
+    // Overseas: no branch lookup needed
+  }, [selectedCountry, isIndia, isCorporate]);
 
   useEffect(() => {
     if (!selectedDivision) return;
@@ -79,10 +83,18 @@ export default function NewMRFPage() {
     if (state) setBranches(state.branches);
   }, [selectedState, states]);
 
+  const isValid = () => {
+    if (!title || !selectedCountry || !selectedDepartment) return false;
+    if (isIndia && (!selectedDivision || !selectedState || !selectedBranch)) return false;
+    if (isCorporate && !selectedBranch) return false;
+    // Overseas: no branch required
+    return true;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (!selectedBranch || !selectedDepartment) {
+    if (!isValid()) {
       setError("Please complete all required fields.");
       return;
     }
@@ -95,7 +107,7 @@ export default function NewMRFPage() {
         title,
         countryId: selectedCountry,
         divisionId: selectedDivision || null,
-        branchId: selectedBranch,
+        branchId: selectedBranch || null,
         departmentId: selectedDepartment,
         designationId: selectedDesignation || null,
         vacancyCount,
@@ -179,8 +191,11 @@ export default function NewMRFPage() {
                 id="vacancyCount"
                 type="number"
                 min={1}
-                value={vacancyCount}
-                onChange={(e) => setVacancyCount(parseInt(e.target.value))}
+                value={String(vacancyCount)}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value);
+                  setVacancyCount(isNaN(n) || n < 1 ? 1 : n);
+                }}
                 required
               />
             </div>
@@ -232,6 +247,13 @@ export default function NewMRFPage() {
               </Select>
             </div>
 
+            {/* Overseas: no branch needed */}
+            {isOverseas && (
+              <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-700">
+                International postings do not require a specific branch/office. The country itself is the location.
+              </div>
+            )}
+
             {/* India: Division → State → Branch */}
             {isIndia && (
               <>
@@ -256,23 +278,26 @@ export default function NewMRFPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Branch *</Label>
+                  <Label>Branch / Office *</Label>
                   <Select onValueChange={setSelectedBranch} disabled={!selectedState}>
                     <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
                     <SelectContent>
-                      {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.code})</SelectItem>)}
+                      {branches.length === 0
+                        ? <SelectItem value="__none" disabled>No branches for this state</SelectItem>
+                        : branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.code})</SelectItem>)
+                      }
                     </SelectContent>
                   </Select>
                 </div>
               </>
             )}
 
-            {/* Overseas / Corporate: direct Branch */}
-            {(isOverseas || isCorporate) && (
+            {/* Corporate: direct Branch */}
+            {isCorporate && (
               <div className="space-y-2">
-                <Label>Branch / Office *</Label>
+                <Label>Office *</Label>
                 <Select onValueChange={setSelectedBranch} disabled={!selectedCountry}>
-                  <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Select office" /></SelectTrigger>
                   <SelectContent>
                     {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.code})</SelectItem>)}
                   </SelectContent>
@@ -290,7 +315,7 @@ export default function NewMRFPage() {
           <Link href="/dashboard/mrfs">
             <Button type="button" variant="outline">Cancel</Button>
           </Link>
-          <Button type="submit" disabled={loading}>
+          <Button type="submit" disabled={loading || !isValid()}>
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             Submit MRF
           </Button>
