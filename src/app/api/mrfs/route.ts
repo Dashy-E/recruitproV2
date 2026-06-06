@@ -2,7 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { generateMRFNumber } from "@/lib/utils";
+async function generateMRFNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `MRF-${year}-`;
+  const lastMrf = await prisma.mRF.findFirst({
+    where: { mrfNumber: { startsWith: prefix } },
+    orderBy: { mrfNumber: "desc" },
+  });
+  let seq = 1;
+  if (lastMrf) {
+    const n = parseInt(lastMrf.mrfNumber.slice(prefix.length), 10);
+    if (!isNaN(n)) seq = n + 1;
+  }
+  return `${prefix}${seq.toString().padStart(4, "0")}`;
+}
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -53,7 +66,7 @@ export async function POST(req: NextRequest) {
 
   const mrf = await prisma.mRF.create({
     data: {
-      mrfNumber: generateMRFNumber(),
+      mrfNumber: await generateMRFNumber(),
       title,
       countryId,
       divisionId: divisionId || null,

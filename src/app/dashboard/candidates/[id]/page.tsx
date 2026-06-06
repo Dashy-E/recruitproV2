@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, ChevronRight, Loader2, Upload, FileText, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ArrowLeft, ChevronRight, Loader2, Upload, FileText, CheckCircle, XCircle, Clock, Pencil, Trash2 } from "lucide-react";
 import { CANDIDATE_STAGES, formatDate } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 
@@ -23,9 +24,16 @@ interface CandidateDetail {
   id: string; firstName: string; lastName: string; email: string; phone: string | null;
   currentStage: string; aiScore: number | null; aiScoreNotes: string | null; resumeUrl: string | null;
   createdAt: string; updatedAt: string;
-  mrf: { id: string; title: string; department: { name: string }; branch: { name: string }; designation: { requiresPsychometric: boolean } | null } | null;
+  mrf: { id: string; title: string; department: { name: string }; branch: { name: string } | null; designation: { requiresPsychometric: boolean } | null } | null;
   stageHistory: { id: string; fromStage: string | null; toStage: string; notes: string | null; changedAt: string }[];
   documents: { id: string; name: string; documentType: string; createdAt: string }[];
+}
+
+interface MRFOption { id: string; mrfNumber: string; title: string; }
+
+interface EditForm {
+  firstName: string; lastName: string; email: string; phone: string;
+  aiScore: string; aiScoreNotes: string; resumeUrl: string; mrfId: string;
 }
 
 const APPROVAL_BADGE: Record<string, { label: string; icon: React.ElementType; cls: string }> = {
@@ -48,6 +56,10 @@ export default function CandidateDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [docType, setDocType] = useState("RECRUITMENT");
   const fileRef = useRef<HTMLInputElement>(null);
+  const [mrfs, setMrfs] = useState<MRFOption[]>([]);
+  const [editDialog, setEditDialog] = useState(false);
+  const [editForm, setEditForm] = useState<EditForm>({ firstName: "", lastName: "", email: "", phone: "", aiScore: "", aiScoreNotes: "", resumeUrl: "", mrfId: "" });
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   const canManage = ["ADMIN", "HR"].includes(role);
 
@@ -63,7 +75,53 @@ export default function CandidateDetailPage() {
       .then((d) => setDocuments(Array.isArray(d) ? d : []));
   };
 
-  useEffect(() => { fetchCandidate(); fetchDocs(); }, [id]);
+  useEffect(() => {
+    fetchCandidate();
+    fetchDocs();
+    fetch("/api/mrfs").then((r) => r.json()).then((d) => setMrfs(Array.isArray(d) ? d : []));
+  }, [id]);
+
+  const openEdit = () => {
+    if (!candidate) return;
+    setEditForm({
+      firstName: candidate.firstName,
+      lastName: candidate.lastName,
+      email: candidate.email,
+      phone: candidate.phone ?? "",
+      aiScore: candidate.aiScore != null ? String(candidate.aiScore) : "",
+      aiScoreNotes: candidate.aiScoreNotes ?? "",
+      resumeUrl: candidate.resumeUrl ?? "",
+      mrfId: candidate.mrf?.id ?? "none",
+    });
+    setEditDialog(true);
+  };
+
+  const handleEdit = async () => {
+    setEditSubmitting(true);
+    const payload: Record<string, unknown> = {
+      firstName: editForm.firstName,
+      lastName: editForm.lastName,
+      email: editForm.email,
+      phone: editForm.phone || null,
+      aiScoreNotes: editForm.aiScoreNotes || null,
+      resumeUrl: editForm.resumeUrl || null,
+      mrfId: editForm.mrfId === "none" ? null : editForm.mrfId,
+    };
+    if (editForm.aiScore !== "") {
+      const parsed = parseFloat(editForm.aiScore);
+      payload.aiScore = isNaN(parsed) ? null : parsed;
+    } else {
+      payload.aiScore = null;
+    }
+    await fetch(`/api/candidates/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setEditSubmitting(false);
+    setEditDialog(false);
+    fetchCandidate();
+  };
 
   const handleStageChange = async () => {
     setSubmitting(true);
@@ -106,6 +164,12 @@ export default function CandidateDetailPage() {
     fetchDocs();
   };
 
+  const handleDeleteDoc = async (docId: string, docName: string) => {
+    if (!confirm(`Delete "${docName}"? This cannot be undone.`)) return;
+    await fetch(`/api/documents/${docId}`, { method: "DELETE" });
+    fetchDocs();
+  };
+
   if (loading) return <div className="py-20 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin" /></div>;
   if (!candidate) return <div className="py-20 text-center text-gray-500">Candidate not found.</div>;
 
@@ -129,6 +193,11 @@ export default function CandidateDetailPage() {
           <h2 className="text-2xl font-bold text-gray-900">{candidate.firstName} {candidate.lastName}</h2>
           <p className="text-sm text-gray-500">{candidate.email} {candidate.phone ? `· ${candidate.phone}` : ""}</p>
         </div>
+        {canManage && (
+          <Button variant="outline" onClick={openEdit}>
+            <Pencil className="h-4 w-4" /> Edit
+          </Button>
+        )}
         {canManage && candidate.currentStage !== "ONBOARDED" && (
           <Button onClick={() => setStageDialog(true)}>
             <ChevronRight className="h-4 w-4" /> Advance Stage
@@ -170,7 +239,7 @@ export default function CandidateDetailPage() {
                   <Link href={`/dashboard/mrfs/${candidate.mrf.id}`} className="text-blue-600 hover:underline font-medium">
                     {candidate.mrf.title}
                   </Link>
-                  <p className="text-xs text-gray-500">{candidate.mrf.department.name} · {candidate.mrf.branch.name}</p>
+                  <p className="text-xs text-gray-500">{candidate.mrf.department.name}{candidate.mrf.branch ? ` · ${candidate.mrf.branch.name}` : ""}</p>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Psychometric Required</span>
@@ -305,6 +374,12 @@ export default function CandidateDetailPage() {
                           onClick={() => handleApproval(doc.id, "REJECTED")}>Reject</Button>
                       </div>
                     )}
+                    {canManage && (
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-gray-400 hover:text-red-600"
+                        onClick={() => handleDeleteDoc(doc.id, doc.name)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 );
               })}
@@ -312,6 +387,66 @@ export default function CandidateDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Candidate Dialog */}
+      <Dialog open={editDialog} onOpenChange={setEditDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Edit Candidate Details</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>First Name *</Label>
+                <Input value={editForm.firstName} onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })} />
+              </div>
+              <div className="space-y-1">
+                <Label>Last Name *</Label>
+                <Input value={editForm.lastName} onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Email *</Label>
+              <Input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>Phone</Label>
+              <Input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} placeholder="Optional" />
+            </div>
+            <div className="space-y-1">
+              <Label>Linked MRF</Label>
+              <Select value={editForm.mrfId} onValueChange={(v) => setEditForm({ ...editForm, mrfId: v })}>
+                <SelectTrigger><SelectValue placeholder="Select MRF" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— None (unlink) —</SelectItem>
+                  {mrfs.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.mrfNumber} – {m.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>AI Score (%)</Label>
+              <Input type="number" min="0" max="100" step="0.1" value={editForm.aiScore}
+                onChange={(e) => setEditForm({ ...editForm, aiScore: e.target.value })} placeholder="e.g. 82.5" />
+            </div>
+            <div className="space-y-1">
+              <Label>AI Score Notes</Label>
+              <Textarea rows={2} value={editForm.aiScoreNotes}
+                onChange={(e) => setEditForm({ ...editForm, aiScoreNotes: e.target.value })} placeholder="Optional notes from AI screening" />
+            </div>
+            <div className="space-y-1">
+              <Label>Resume URL</Label>
+              <Input value={editForm.resumeUrl} onChange={(e) => setEditForm({ ...editForm, resumeUrl: e.target.value })} placeholder="https://..." />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialog(false)}>Cancel</Button>
+            <Button onClick={handleEdit} disabled={!editForm.firstName || !editForm.email || editSubmitting}>
+              {editSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Advance Stage Dialog */}
       <Dialog open={stageDialog} onOpenChange={setStageDialog}>
