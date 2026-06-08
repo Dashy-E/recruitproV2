@@ -10,13 +10,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Plus, Search, Users, Loader2 } from "lucide-react";
+import { Plus, Search, Users, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import { CANDIDATE_STAGES, formatDate } from "@/lib/utils";
 import { Suspense } from "react";
 
 interface Candidate {
   id: string; firstName: string; lastName: string; email: string; phone: string | null;
-  currentStage: string; aiScore: number | null; createdAt: string;
+  currentStage: string; candidateStatus: string; statusNote: string | null;
+  aiScore: number | null; createdAt: string; interviewDate: string | null;
   mrf: {
     id: string; title: string;
     department: { name: string };
@@ -27,6 +28,170 @@ interface Candidate {
 
 interface MRF { id: string; mrfNumber: string; title: string }
 
+const STATUS_BADGE: Record<string, string> = {
+  ACTIVE: "",
+  REJECTED: "bg-red-100 text-red-700",
+  ON_HOLD: "bg-yellow-100 text-yellow-700",
+};
+
+function isoWeek(d: Date): string {
+  const jan4 = new Date(d.getFullYear(), 0, 4);
+  const diff = (d.getTime() - jan4.getTime()) / 86400000;
+  const week = Math.ceil((diff + jan4.getDay() + 1) / 7);
+  return `${d.getFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function groupByDay(candidates: Candidate[]) {
+  const groups: Record<string, Candidate[]> = {};
+  for (const c of candidates) {
+    const d = new Date(c.createdAt);
+    const key = d.toISOString().slice(0, 10);
+    const label = d.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+    const groupKey = `${key}|${label}`;
+    if (!groups[groupKey]) groups[groupKey] = [];
+    groups[groupKey].push(c);
+  }
+  return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
+}
+
+function groupByWeek(candidates: Candidate[]) {
+  const groups: Record<string, Candidate[]> = {};
+  for (const c of candidates) {
+    const d = new Date(c.createdAt);
+    const week = isoWeek(d);
+    // Find Monday of this week
+    const dayOfWeek = d.getDay() === 0 ? 6 : d.getDay() - 1;
+    const monday = new Date(d); monday.setDate(d.getDate() - dayOfWeek);
+    const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+    const label = `${monday.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${sunday.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`;
+    const groupKey = `${week}|${label}`;
+    if (!groups[groupKey]) groups[groupKey] = [];
+    groups[groupKey].push(c);
+  }
+  return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
+}
+
+function groupByMonth(candidates: Candidate[]) {
+  const groups: Record<string, Candidate[]> = {};
+  for (const c of candidates) {
+    const d = new Date(c.createdAt);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const label = d.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+    const groupKey = `${key}|${label}`;
+    if (!groups[groupKey]) groups[groupKey] = [];
+    groups[groupKey].push(c);
+  }
+  return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
+}
+
+function groupByInterviewDate(candidates: Candidate[]) {
+  const groups: Record<string, Candidate[]> = {};
+  for (const c of candidates) {
+    if (!c.interviewDate) {
+      if (!groups["__unscheduled"]) groups["__unscheduled"] = [];
+      groups["__unscheduled"].push(c);
+    } else {
+      const d = new Date(c.interviewDate);
+      const key = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+      const groupKey = `${key}|Interview – ${label}`;
+      if (!groups[groupKey]) groups[groupKey] = [];
+      groups[groupKey].push(c);
+    }
+  }
+  return Object.entries(groups).sort((a, b) => {
+    if (a[0] === "__unscheduled") return 1;
+    if (b[0] === "__unscheduled") return -1;
+    return a[0].localeCompare(b[0]);
+  });
+}
+
+function CandidateRow({ c }: { c: Candidate }) {
+  const stage = CANDIDATE_STAGES.find((s) => s.key === c.currentStage);
+  const statusCls = STATUS_BADGE[c.candidateStatus] || STATUS_BADGE.ACTIVE;
+  return (
+    <TableRow key={c.id}>
+      <TableCell className="font-medium">{c.firstName} {c.lastName}</TableCell>
+      <TableCell className="text-sm text-gray-500">{c.email}</TableCell>
+      <TableCell>
+        {c.mrf ? (
+          <>
+            <p className="text-sm font-medium">{c.mrf.title}</p>
+            <p className="text-xs text-gray-500">
+              {c.mrf.department.name}
+              {c.mrf.branch
+                ? ` · ${c.mrf.branch.name}${c.mrf.branch.state ? `, ${c.mrf.branch.state.name}` : ""}`
+                : ""}
+              {" · "}{c.mrf.country.name}
+            </p>
+          </>
+        ) : "—"}
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1 flex-wrap">
+          <Badge variant="default">{stage?.label || c.currentStage}</Badge>
+          {c.candidateStatus !== "ACTIVE" && (
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusCls}`}>
+              {c.candidateStatus === "ON_HOLD" ? "On Hold" : c.candidateStatus}
+            </span>
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        {c.aiScore != null ? (
+          <span className={`font-medium text-sm ${c.aiScore >= 70 ? "text-green-600" : "text-orange-600"}`}>
+            {c.aiScore.toFixed(1)}%
+          </span>
+        ) : "—"}
+      </TableCell>
+      <TableCell className="text-sm text-gray-500">{formatDate(c.createdAt)}</TableCell>
+      <TableCell>
+        <Link href={`/dashboard/candidates/${c.id}`} className="text-blue-600 hover:underline text-sm">
+          View
+        </Link>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function CandidateTable({ candidates }: { candidates: Candidate[] }) {
+  if (candidates.length === 0) return null;
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead>Email</TableHead>
+          <TableHead>MRF / Position</TableHead>
+          <TableHead>Stage / Status</TableHead>
+          <TableHead>AI Score</TableHead>
+          <TableHead>Added</TableHead>
+          <TableHead></TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {candidates.map((c) => <CandidateRow key={c.id} c={c} />)}
+      </TableBody>
+    </Table>
+  );
+}
+
+function CollapsibleSection({ title, candidates, defaultOpen = false }: { title: string; candidates: Candidate[]; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-sm font-medium"
+      >
+        <span>{title} ({candidates.length})</span>
+        {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+      </button>
+      {open && <CandidateTable candidates={candidates} />}
+    </div>
+  );
+}
+
 function CandidatesContent() {
   const searchParams = useSearchParams();
   const mrfFilter = searchParams.get("mrfId") || "";
@@ -35,6 +200,8 @@ function CandidatesContent() {
   const [mrfs, setMrfs] = useState<MRF[]>([]);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [viewMode, setViewMode] = useState<"list" | "daily" | "weekly" | "monthly">("list");
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", mrfId: mrfFilter });
@@ -42,7 +209,7 @@ function CandidatesContent() {
 
   const fetchCandidates = () => {
     const url = mrfFilter ? `/api/candidates?mrfId=${mrfFilter}` : "/api/candidates";
-    fetch(url).then((r) => r.json()).then((d) => { setCandidates(d); setLoading(false); });
+    fetch(url).then((r) => r.json()).then((d) => { setCandidates(Array.isArray(d) ? d : []); setLoading(false); });
   };
 
   useEffect(() => {
@@ -50,7 +217,16 @@ function CandidatesContent() {
     fetch("/api/mrfs").then((r) => r.json()).then(setMrfs);
   }, []);
 
-  const filtered = candidates.filter((c) => {
+  // Separate active/rejected/on-hold
+  const activeCandidates = candidates.filter((c) => c.candidateStatus === "ACTIVE");
+  const rejectedCandidates = candidates.filter((c) => c.candidateStatus === "REJECTED");
+  const onHoldCandidates = candidates.filter((c) => c.candidateStatus === "ON_HOLD");
+
+  const basePool = statusFilter === "REJECTED" ? rejectedCandidates
+    : statusFilter === "ON_HOLD" ? onHoldCandidates
+    : activeCandidates;
+
+  const filtered = basePool.filter((c) => {
     const matchesSearch =
       `${c.firstName} ${c.lastName}`.toLowerCase().includes(search.toLowerCase()) ||
       c.email.toLowerCase().includes(search.toLowerCase());
@@ -71,7 +247,11 @@ function CandidatesContent() {
     fetchCandidates();
   };
 
-  const stageCount = (key: string) => candidates.filter((c) => c.currentStage === key).length;
+  const stageCount = (key: string) => activeCandidates.filter((c) => c.currentStage === key).length;
+
+  const INTERVIEW_STAGES = new Set(["INTERVIEW_1", "INTERVIEW_2", "INTERVIEW_3"]);
+  const interviewedFiltered = filtered.filter((c) => INTERVIEW_STAGES.has(c.currentStage));
+  const isInterviewedView = INTERVIEW_STAGES.has(stageFilter);
 
   return (
     <div className="space-y-6">
@@ -80,9 +260,21 @@ function CandidatesContent() {
           <h2 className="text-2xl font-bold text-gray-900">Candidates</h2>
           <p className="text-sm text-gray-500 mt-1">{candidates.length} total candidates</p>
         </div>
-        <Button onClick={() => setShowAdd(true)}>
-          <Plus className="h-4 w-4" /> Add Candidate
-        </Button>
+        <div className="flex items-center gap-2">
+          {(["list", "daily", "weekly", "monthly"] as const).map((mode) => (
+            <Button
+              key={mode}
+              variant={viewMode === mode ? "default" : "outline"}
+              size="sm"
+              onClick={() => setViewMode(mode)}
+            >
+              {mode.charAt(0).toUpperCase() + mode.slice(1)}
+            </Button>
+          ))}
+          <Button onClick={() => setShowAdd(true)}>
+            <Plus className="h-4 w-4" /> Add Candidate
+          </Button>
+        </div>
       </div>
 
       {/* Stage Pipeline Overview */}
@@ -102,6 +294,24 @@ function CandidatesContent() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Status filter tabs */}
+      <div className="flex items-center gap-2">
+        {[
+          { key: "ALL", label: `Active (${activeCandidates.length})`, cls: "bg-blue-600 text-white" },
+          { key: "REJECTED", label: `Rejected (${rejectedCandidates.length})`, cls: "bg-red-100 text-red-700" },
+          { key: "ON_HOLD", label: `On Hold (${onHoldCandidates.length})`, cls: "bg-yellow-100 text-yellow-700" },
+        ].map(({ key, label, cls }) => (
+          <button
+            key={key}
+            onClick={() => setStatusFilter(key)}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors
+              ${statusFilter === key ? cls : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <Card>
@@ -137,64 +347,53 @@ function CandidatesContent() {
               <Users className="mx-auto h-12 w-12 text-gray-300 mb-3" />
               <p>No candidates found.</p>
             </div>
+          ) : viewMode === "daily" ? (
+            <div className="p-4 space-y-4">
+              {groupByDay(filtered).map(([groupKey, groupCandidates]) => (
+                <CollapsibleSection key={groupKey} title={groupKey.split("|")[1]} candidates={groupCandidates} defaultOpen />
+              ))}
+            </div>
+          ) : viewMode === "weekly" ? (
+            <div className="p-4 space-y-4">
+              {groupByWeek(filtered).map(([groupKey, groupCandidates]) => (
+                <CollapsibleSection key={groupKey} title={groupKey.split("|")[1]} candidates={groupCandidates} defaultOpen />
+              ))}
+            </div>
+          ) : viewMode === "monthly" ? (
+            <div className="p-4 space-y-4">
+              {groupByMonth(filtered).map(([groupKey, groupCandidates]) => (
+                <CollapsibleSection key={groupKey} title={groupKey.split("|")[1]} candidates={groupCandidates} defaultOpen />
+              ))}
+            </div>
+          ) : isInterviewedView ? (
+            <div className="p-4 space-y-4">
+              {groupByInterviewDate(interviewedFiltered).map(([groupKey, groupCandidates]) => {
+                const label = groupKey === "__unscheduled" ? "Unscheduled" : groupKey.split("|")[1];
+                return (
+                  <CollapsibleSection key={groupKey} title={label} candidates={groupCandidates} defaultOpen />
+                );
+              })}
+              {filtered.filter((c) => !INTERVIEW_STAGES.has(c.currentStage)).length > 0 && (
+                <CandidateTable candidates={filtered.filter((c) => !INTERVIEW_STAGES.has(c.currentStage))} />
+              )}
+            </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>MRF / Position</TableHead>
-                  <TableHead>Current Stage</TableHead>
-                  <TableHead>AI Score</TableHead>
-                  <TableHead>Added</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((c) => {
-                  const stage = CANDIDATE_STAGES.find((s) => s.key === c.currentStage);
-                  return (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-medium">{c.firstName} {c.lastName}</TableCell>
-                      <TableCell className="text-sm text-gray-500">{c.email}</TableCell>
-                      <TableCell>
-                        {c.mrf ? (
-                          <>
-                            <p className="text-sm font-medium">{c.mrf.title}</p>
-                            <p className="text-xs text-gray-500">
-                              {c.mrf.department.name}
-                              {c.mrf.branch
-                                ? ` · ${c.mrf.branch.name}${c.mrf.branch.state ? `, ${c.mrf.branch.state.name}` : ""}`
-                                : ""}
-                              {" · "}{c.mrf.country.name}
-                            </p>
-                          </>
-                        ) : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="default">{stage?.label || c.currentStage}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        {c.aiScore != null ? (
-                          <span className={`font-medium text-sm ${c.aiScore >= 70 ? "text-green-600" : "text-orange-600"}`}>
-                            {c.aiScore.toFixed(1)}%
-                          </span>
-                        ) : "—"}
-                      </TableCell>
-                      <TableCell className="text-sm text-gray-500">{formatDate(c.createdAt)}</TableCell>
-                      <TableCell>
-                        <Link href={`/dashboard/candidates/${c.id}`} className="text-blue-600 hover:underline text-sm">
-                          View
-                        </Link>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <CandidateTable candidates={filtered} />
           )}
         </CardContent>
       </Card>
+
+      {/* Rejected/On Hold sections */}
+      {statusFilter === "ALL" && (rejectedCandidates.length > 0 || onHoldCandidates.length > 0) && (
+        <div className="space-y-3">
+          {rejectedCandidates.length > 0 && (
+            <CollapsibleSection title="Rejected Candidates" candidates={rejectedCandidates} />
+          )}
+          {onHoldCandidates.length > 0 && (
+            <CollapsibleSection title="On Hold Candidates" candidates={onHoldCandidates} />
+          )}
+        </div>
+      )}
 
       {/* Add Candidate Dialog */}
       <Dialog open={showAdd} onOpenChange={setShowAdd}>

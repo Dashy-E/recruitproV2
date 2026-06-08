@@ -65,6 +65,7 @@ model Branch {
   state   State?   @relation(fields: [stateId], references: [id])
   users   User[]
   mrfs    MRF[]
+  employees Employee[]
 }
 
 model Department {
@@ -130,6 +131,7 @@ model User {
   recordedApprovals      MRFApprovalRecord[]      @relation("RecorderRecords")
   uploadedDocuments      Document[]               @relation("UploadedBy")
   interviews             InterviewRecord[]
+  sentEmails             Email[]                  @relation("SentEmails")
 }
 
 model UserCountryAssignment {
@@ -197,6 +199,29 @@ model MRF {
   approvedAt      DateTime?
   rejectedAt      DateTime?
   rejectionReason String?
+  vacancyType               String?
+  replacedEmployeeName      String?
+  replacedEmployeeCTC       String?
+  replacementFor            String?
+  replacementReason         String?
+  replacementNecessityReason String?
+  isNewRole                 Boolean   @default(false)
+  isBusinessExpansion       Boolean   @default(false)
+  newRoleJustification      String?
+  isBudgeted                Boolean?
+  proposedGrade             String?
+  ctcRange                  String?
+  location                  String?
+  reportingTo               String?
+  jobProfile                String?
+  minAge                    Int?
+  maxAge                    Int?
+  minQualification          String?
+  preferredQualification    String?
+  workExperience            String?
+  industryBackground        String?
+  otherSpecs                String?
+  contributionJustified     Boolean   @default(false)
 
   country     Country      @relation(fields: [countryId], references: [id])
   division    Division?    @relation(fields: [divisionId], references: [id])
@@ -244,12 +269,18 @@ model Candidate {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  candidateStatus String    @default("ACTIVE")
+  statusNote      String?
+  interviewDate   DateTime?
+
   user         User                    @relation(fields: [userId], references: [id])
   mrf          MRF?                    @relation(fields: [mrfId], references: [id])
   stageHistory CandidateStageHistory[]
   interviews   InterviewRecord[]
   documents    Document[]
   offerDetail  OfferDetail?
+  employee     Employee?
+  emails       Email[]
 }
 
 model CandidateStageHistory {
@@ -307,4 +338,37 @@ model Document {
   candidate       Candidate?         @relation(fields: [candidateId], references: [id])
   mrf             MRF?               @relation(fields: [mrfId], references: [id])
   approvalRecords MRFApprovalRecord[]
+}
+
+model Employee {
+  id           String   @id @default(cuid())
+  candidateId  String   @unique
+  employeeCode String   @unique
+  joiningDate  DateTime
+  department   String?
+  designation  String?
+  ctc          Float?
+  reportingTo  String?
+  branchId     String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id])
+  branch    Branch?   @relation(fields: [branchId], references: [id])
+}
+
+model Email {
+  id          String   @id @default(cuid())
+  fromId      String
+  toEmail     String
+  subject     String
+  body        String
+  isRead      Boolean  @default(false)
+  sentAt      DateTime @default(now())
+  candidateId String?
+  mrfId       String?
+
+  from      User       @relation("SentEmails", fields: [fromId], references: [id])
+  candidate Candidate? @relation(fields: [candidateId], references: [id])
 }

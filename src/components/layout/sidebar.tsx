@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import {
   LayoutDashboard, FileText, Users, Building2, Globe, Settings,
-  LogOut, ChevronDown, Briefcase, ClipboardList, BarChart3, FolderOpen
+  LogOut, ChevronDown, ClipboardList, BarChart3, FolderOpen, UserCheck, Mail
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -65,16 +65,22 @@ const navItems: NavItem[] = [
     roles: ["ADMIN", "HR"],
   },
   {
+    label: "Employees",
+    href: "/dashboard/employees",
+    icon: UserCheck,
+    roles: ["ADMIN", "HR"],
+  },
+  {
+    label: "Email",
+    href: "/dashboard/email",
+    icon: Mail,
+    roles: ["ADMIN", "HR"],
+  },
+  {
     label: "Settings",
     href: "/dashboard/settings",
     icon: Settings,
     roles: ["ADMIN"],
-  },
-  {
-    label: "My Application",
-    href: "/dashboard/my-application",
-    icon: Briefcase,
-    roles: ["CANDIDATE"],
   },
 ];
 

@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
       user: { select: { name: true, email: true } },
       mrf: { include: { department: true, branch: { include: { state: true, country: true } }, country: true } },
       stageHistory: { orderBy: { changedAt: "desc" } },
+      employee: { select: { id: true } },
     },
     orderBy: { createdAt: "desc" },
   });

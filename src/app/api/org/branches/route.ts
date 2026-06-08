@@ -7,6 +7,17 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const countryId = searchParams.get("countryId");
   const stateId = searchParams.get("stateId");
+  const divisionId = searchParams.get("divisionId");
+
+  if (divisionId) {
+    const states = await prisma.state.findMany({ where: { divisionId } });
+    const stateIds = states.map((s) => s.id);
+    const branches = await prisma.branch.findMany({
+      where: { stateId: { in: stateIds }, isActive: true },
+      orderBy: { name: "asc" },
+    });
+    return NextResponse.json(branches);
+  }
 
   const branches = await prisma.branch.findMany({
     where: {

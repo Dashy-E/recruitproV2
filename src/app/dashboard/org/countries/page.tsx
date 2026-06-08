@@ -81,8 +81,8 @@ export default function CountriesPage() {
     ];
     return (
       <Card key={country.id} className="overflow-hidden">
-        <button
-          className="w-full text-left px-6 py-4 flex items-center gap-3 hover:bg-gray-50 transition-colors"
+        <div
+          className="w-full text-left px-6 py-4 flex items-center gap-3 hover:bg-gray-50 transition-colors cursor-pointer select-none"
           onClick={() => toggle(country.id)}
         >
           <Globe className="h-5 w-5 text-blue-600 shrink-0" />
@@ -105,7 +105,7 @@ export default function CountriesPage() {
             </Button>
             {isOpen ? <ChevronDown className="h-4 w-4 text-gray-400" /> : <ChevronRight className="h-4 w-4 text-gray-400" />}
           </div>
-        </button>
+        </div>
 
         {isOpen && (
           <div className="border-t border-gray-100 px-6 py-4 bg-gray-50">

@@ -21,16 +21,21 @@ export function generateMRFNumber(): string {
 }
 
 export const CANDIDATE_STAGES = [
-  { key: "APPLIED", label: "Applied", step: 1 },
-  { key: "AI_SCREENING", label: "AI Screening", step: 2 },
-  { key: "SHORTLISTED", label: "Shortlisted", step: 3 },
-  { key: "INTERVIEW", label: "Interview", step: 4 },
-  { key: "PSYCHOMETRIC_TEST", label: "Psychometric Test", step: 5 },
-  { key: "OFFER", label: "Offer", step: 6 },
-  { key: "PROBATION", label: "Probation", step: 7 },
-  { key: "CHEMISTRY_TEST_TRAINING", label: "Chemistry Test Training", step: 8 },
-  { key: "CHEMISTRY_TEST", label: "Chemistry Test", step: 9 },
-  { key: "ONBOARDED", label: "Onboarded", step: 10 },
+  { key: "APPLIED",               label: "Applications",               step: 1  },
+  { key: "INTERVIEW_1",           label: "Interview – Round 1",        step: 2  },
+  { key: "INTERVIEW_2",           label: "Interview – Round 2",        step: 3  },
+  { key: "INTERVIEW_3",           label: "Interview – Round 3",        step: 4  },
+  { key: "PSYCHOMETRIC_TEST",     label: "Psychometric Test",          step: 5  },
+  { key: "SHORTLISTED",           label: "Shortlisted / Selected",     step: 6  },
+  { key: "SALARY_NEGOTIATION",    label: "Salary Negotiation & Docs",  step: 7  },
+  { key: "CTC_OFFERED",           label: "CTC Offered",                step: 8  },
+  { key: "OFFER_LETTER",          label: "Offer Letter Issued",        step: 9  },
+  { key: "JOINED",                label: "Joined",                     step: 10 },
+  { key: "ONBOARDING",            label: "Onboarding",                 step: 11 },
+  { key: "EMPLOYEE_FILE",         label: "Employee File",              step: 12 },
+  { key: "EMPLOYEE_FEEDBACK",     label: "Employee Feedback",          step: 13 },
+  { key: "CONFIRMATION_PROCESS",  label: "Confirmation Process",       step: 14 },
+  { key: "CONFIRMATION_LETTER",   label: "Confirmation Letter",        step: 15 },
 ] as const;
 
 export const MRF_STATUSES = {
@@ -50,6 +55,7 @@ export const USER_ROLES = {
   FUNCTIONAL_HEAD: "Functional Head",
   COUNTRY_MANAGER: "Country Manager",
   CANDIDATE: "Candidate",
+  EMPLOYEE: "Employee",
 } as const;
 
 export type UserRole = keyof typeof USER_ROLES;

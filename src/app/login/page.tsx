@@ -14,6 +14,7 @@ const QUICK_ACCOUNTS = [
   { label: "Branch Mgr", email: "bm@recruitpro.com", password: "bm123", color: "bg-green-600 hover:bg-green-700 text-white" },
   { label: "Div. Manager", email: "dm@recruitpro.com", password: "dm123", color: "bg-yellow-600 hover:bg-yellow-700 text-white" },
   { label: "Candidate", email: "candidate@recruitpro.com", password: "candidate123", color: "bg-gray-600 hover:bg-gray-700 text-white" },
+  { label: "Employee", email: "employee@recruitpro.com", password: "emp123", color: "bg-teal-600 hover:bg-teal-700 text-white" },
 ];
 
 export default function LoginPage() {

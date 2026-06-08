@@ -34,6 +34,7 @@ interface MRFOption { id: string; mrfNumber: string; title: string; }
 interface EditForm {
   firstName: string; lastName: string; email: string; phone: string;
   aiScore: string; aiScoreNotes: string; resumeUrl: string; mrfId: string;
+  password: string;
 }
 
 const APPROVAL_BADGE: Record<string, { label: string; icon: React.ElementType; cls: string }> = {
@@ -58,7 +59,7 @@ export default function CandidateDetailPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [mrfs, setMrfs] = useState<MRFOption[]>([]);
   const [editDialog, setEditDialog] = useState(false);
-  const [editForm, setEditForm] = useState<EditForm>({ firstName: "", lastName: "", email: "", phone: "", aiScore: "", aiScoreNotes: "", resumeUrl: "", mrfId: "" });
+  const [editForm, setEditForm] = useState<EditForm>({ firstName: "", lastName: "", email: "", phone: "", aiScore: "", aiScoreNotes: "", resumeUrl: "", mrfId: "", password: "" });
   const [editSubmitting, setEditSubmitting] = useState(false);
 
   const canManage = ["ADMIN", "HR"].includes(role);
@@ -92,6 +93,7 @@ export default function CandidateDetailPage() {
       aiScoreNotes: candidate.aiScoreNotes ?? "",
       resumeUrl: candidate.resumeUrl ?? "",
       mrfId: candidate.mrf?.id ?? "none",
+      password: "",
     });
     setEditDialog(true);
   };
@@ -113,6 +115,7 @@ export default function CandidateDetailPage() {
     } else {
       payload.aiScore = null;
     }
+    if (editForm.password) payload.newPassword = editForm.password;
     await fetch(`/api/candidates/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -390,16 +393,18 @@ export default function CandidateDetailPage() {
 
       {/* Edit Candidate Dialog */}
       <Dialog open={editDialog} onOpenChange={setEditDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Edit Candidate Details</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
+        <DialogContent className="max-w-lg flex flex-col max-h-[90vh]">
+          <DialogHeader className="shrink-0">
+            <DialogTitle>Edit Candidate Details</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-4 py-2 pr-1">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>First Name *</Label>
                 <Input value={editForm.firstName} onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })} />
               </div>
               <div className="space-y-1">
-                <Label>Last Name *</Label>
+                <Label>Last Name</Label>
                 <Input value={editForm.lastName} onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })} />
               </div>
             </div>
@@ -410,6 +415,10 @@ export default function CandidateDetailPage() {
             <div className="space-y-1">
               <Label>Phone</Label>
               <Input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} placeholder="Optional" />
+            </div>
+            <div className="space-y-1">
+              <Label>Password <span className="text-gray-400 font-normal text-xs">(leave blank to keep current)</span></Label>
+              <Input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Set new portal password" />
             </div>
             <div className="space-y-1">
               <Label>Linked MRF</Label>
@@ -438,7 +447,7 @@ export default function CandidateDetailPage() {
               <Input value={editForm.resumeUrl} onChange={(e) => setEditForm({ ...editForm, resumeUrl: e.target.value })} placeholder="https://..." />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 pt-2 border-t">
             <Button variant="outline" onClick={() => setEditDialog(false)}>Cancel</Button>
             <Button onClick={handleEdit} disabled={!editForm.firstName || !editForm.email || editSubmitting}>
               {editSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}

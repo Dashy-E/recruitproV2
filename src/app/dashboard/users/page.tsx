@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Loader2, UserCheck } from "lucide-react";
+import { Plus, Search, Loader2, UserCheck, Pencil } from "lucide-react";
 import { formatDate, USER_ROLES } from "@/lib/utils";
 
 interface User {
@@ -56,6 +56,13 @@ export default function UsersPage() {
     branchId: "", countryId: "", departmentId: "",
   });
 
+  const [editUser, setEditUser] = useState<User | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "", email: "", userRole: "", branchId: "", countryId: "", password: "", confirmPassword: "",
+  });
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState("");
+
   const fetchUsers = () => {
     fetch("/api/users").then((r) => r.json()).then((d) => { setUsers(Array.isArray(d) ? d : []); setLoading(false); });
   };
@@ -96,6 +103,41 @@ export default function UsersPage() {
     setForm({ name: "", email: "", password: "", userRole: "HR", branchId: "", countryId: "", departmentId: "" });
     fetchUsers();
   };
+
+  const openEdit = (u: User) => {
+    setEditUser(u);
+    setEditForm({ name: u.name, email: u.email, userRole: u.role, branchId: "", countryId: "", password: "", confirmPassword: "" });
+    setEditError("");
+  };
+
+  const handleEdit = async () => {
+    if (!editUser) return;
+    setEditError("");
+    setEditSubmitting(true);
+    const payload: Record<string, unknown> = {
+      name: editForm.name,
+      email: editForm.email,
+      userRole: editForm.userRole,
+      branchId: editForm.branchId || undefined,
+      countryId: editForm.countryId || undefined,
+    };
+    if (editForm.password) payload.password = editForm.password;
+    const res = await fetch(`/api/users/${editUser.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setEditSubmitting(false);
+    if (!res.ok) {
+      const data = await res.json();
+      setEditError(data.error || "Failed to update user.");
+      return;
+    }
+    setEditUser(null);
+    fetchUsers();
+  };
+
+  const editPasswordsMatch = editForm.password === editForm.confirmPassword;
 
   const needsDept = form.userRole === "FUNCTIONAL_HEAD";
   const needsBranch = form.userRole === "BRANCH_MANAGER";
@@ -148,6 +190,7 @@ export default function UsersPage() {
                   <TableHead>Branch / Country</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Joined</TableHead>
+                  <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -169,6 +212,11 @@ export default function UsersPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-gray-500">{formatDate(u.createdAt)}</TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => openEdit(u)}>
+                        <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -176,6 +224,82 @@ export default function UsersPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit User Dialog */}
+      <Dialog open={!!editUser} onOpenChange={(open) => { if (!open) setEditUser(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Edit User — {editUser?.name}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Full Name *</Label>
+              <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>Email *</Label>
+              <Input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>Role</Label>
+              <Select value={editForm.userRole} onValueChange={(v) => setEditForm({ ...editForm, userRole: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {creatableRoles.map(([key, label]) => (
+                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Branch <span className="text-gray-400 font-normal">(optional)</span></Label>
+                <Select value={editForm.branchId} onValueChange={(v) => setEditForm({ ...editForm, branchId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Keep current" /></SelectTrigger>
+                  <SelectContent>
+                    {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Country <span className="text-gray-400 font-normal">(optional)</span></Label>
+                <Select value={editForm.countryId} onValueChange={(v) => setEditForm({ ...editForm, countryId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Keep current" /></SelectTrigger>
+                  <SelectContent>
+                    {countries.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="border-t pt-3 space-y-3">
+              <p className="text-sm font-medium text-gray-700">Change Password <span className="text-gray-400 font-normal">(leave blank to keep current)</span></p>
+              <div className="space-y-1">
+                <Label>New Password</Label>
+                <Input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Min. 6 characters" />
+              </div>
+              <div className="space-y-1">
+                <Label>Confirm Password</Label>
+                <Input type="password" value={editForm.confirmPassword} onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })} placeholder="Re-enter new password" />
+                {editForm.confirmPassword && !editPasswordsMatch && (
+                  <p className="text-xs text-red-500">Passwords do not match.</p>
+                )}
+              </div>
+            </div>
+            {editError && <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">{editError}</div>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditUser(null)}>Cancel</Button>
+            <Button
+              onClick={handleEdit}
+              disabled={
+                !editForm.name || !editForm.email || editSubmitting ||
+                (!!editForm.password && (editForm.password.length < 6 || !editPasswordsMatch))
+              }
+            >
+              {editSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add User Dialog */}
       <Dialog open={showAdd} onOpenChange={(open) => { setShowAdd(open); setError(""); }}>
