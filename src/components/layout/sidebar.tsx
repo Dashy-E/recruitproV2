@@ -77,6 +77,12 @@ const navItems: NavItem[] = [
     roles: ["ADMIN", "HR"],
   },
   {
+    label: "Employee Portal",
+    href: "/dashboard/employee-portal",
+    icon: UserCheck,
+    roles: ["EMPLOYEE"],
+  },
+  {
     label: "Settings",
     href: "/dashboard/settings",
     icon: Settings,

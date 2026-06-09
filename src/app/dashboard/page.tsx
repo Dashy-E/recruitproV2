@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClipboardList, Users, CheckCircle, Clock, TrendingUp, FileText } from "lucide-react";
 import { CANDIDATE_STAGES } from "@/lib/utils";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
@@ -35,60 +36,7 @@ export default async function DashboardPage() {
   const isEmployeeUser = role === "EMPLOYEE";
 
   if (isEmployeeUser) {
-    const candidate = await prisma.candidate.findFirst({ where: { userId } });
-    const employee = candidate
-      ? await prisma.employee.findUnique({
-          where: { candidateId: candidate.id },
-          include: { candidate: { include: { mrf: { include: { department: true, branch: true } } } } },
-        })
-      : null;
-    return (
-      <div className="space-y-6">
-        <div className="rounded-lg bg-teal-600 p-6 text-white">
-          <h2 className="text-2xl font-bold">Welcome, {session?.user?.name}!</h2>
-          <p className="mt-1 text-teal-100">Employee Portal — RecruitPro ERP</p>
-        </div>
-        {employee ? (
-          <Card>
-            <CardHeader><CardTitle>Your Employee Details</CardTitle></CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-500">Employee Code</span>
-                <span className="font-mono font-semibold">{employee.employeeCode}</span>
-              </div>
-              {employee.department && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Department</span>
-                  <span>{employee.department}</span>
-                </div>
-              )}
-              {employee.designation && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Designation</span>
-                  <span>{employee.designation}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-gray-500">Joining Date</span>
-                <span>{new Date(employee.joiningDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
-              </div>
-              {employee.candidate?.mrf && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Joined via MRF</span>
-                  <span>{employee.candidate.mrf.title}</span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardContent className="py-8 text-center text-gray-500">
-              <p>Your employee profile is being set up. Please check back shortly.</p>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-    );
+    redirect("/dashboard/employee-portal");
   }
 
   if (isCandidateUser) {

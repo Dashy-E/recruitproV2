@@ -16,10 +16,10 @@ export async function GET(req: NextRequest) {
   const candidateId = searchParams.get("candidateId");
 
   if (!["ADMIN", "HR"].includes(role || "")) {
-    if (role === "CANDIDATE" && candidateId) {
-      // Candidates can only view their own docs
+    if (["CANDIDATE", "EMPLOYEE"].includes(role || "")) {
+      // Can only view their own docs
       const candidate = await prisma.candidate.findFirst({ where: { userId } });
-      if (!candidate || candidate.id !== candidateId) {
+      if (!candidate || (candidateId && candidate.id !== candidateId)) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
     } else {
@@ -56,16 +56,21 @@ export async function POST(req: NextRequest) {
 
   if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
 
-  // Candidates can only upload for themselves, and only before SHORTLISTED
-  if (role === "CANDIDATE") {
+  if (role === "EMPLOYEE") {
+    // Employees can only upload for their own candidate profile (onboarding docs)
     const candidate = await prisma.candidate.findFirst({ where: { userId } });
     if (!candidate) return NextResponse.json({ error: "No candidate profile" }, { status: 404 });
-
-    const preShortlistStages = ["APPLIED", "AI_SCREENING"];
+    if (candidateId && candidateId !== candidate.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  } else if (role === "CANDIDATE") {
+    // Candidates can only upload for themselves, only before SHORTLISTED
+    const candidate = await prisma.candidate.findFirst({ where: { userId } });
+    if (!candidate) return NextResponse.json({ error: "No candidate profile" }, { status: 404 });
+    const preShortlistStages = ["APPLIED", "INTERVIEW_1", "INTERVIEW_2", "INTERVIEW_3"];
     if (!preShortlistStages.includes(candidate.currentStage)) {
       return NextResponse.json({ error: "Document upload is only allowed before the Shortlisted stage" }, { status: 400 });
     }
-    // Force candidateId to be their own
     if (candidateId && candidateId !== candidate.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -86,9 +91,9 @@ export async function POST(req: NextRequest) {
   // Candidate uploads start as PENDING (need approval); HR/Admin uploads auto-approved
   const approvalStatus = ["ADMIN", "HR"].includes(role || "") ? "APPROVED" : "PENDING";
 
-  // Resolve candidateId for the uploader if they're a candidate
+  // Resolve candidateId for the uploader if they're a candidate or employee
   let resolvedCandidateId = candidateId;
-  if (role === "CANDIDATE" && !resolvedCandidateId) {
+  if (["CANDIDATE", "EMPLOYEE"].includes(role || "") && !resolvedCandidateId) {
     const candidate = await prisma.candidate.findFirst({ where: { userId } });
     resolvedCandidateId = candidate?.id ?? null;
   }

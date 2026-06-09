@@ -341,18 +341,19 @@ model Document {
 }
 
 model Employee {
-  id           String   @id @default(cuid())
-  candidateId  String   @unique
-  employeeCode String   @unique
-  joiningDate  DateTime
-  department   String?
-  designation  String?
-  ctc          Float?
-  reportingTo  String?
-  branchId     String?
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               String   @id @default(cuid())
+  candidateId      String   @unique
+  employeeCode     String   @unique
+  joiningDate      DateTime
+  department       String?
+  designation      String?
+  ctc              Float?
+  reportingTo      String?
+  branchId         String?
+  isActive         Boolean  @default(true)
+  onboardingStep   Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   candidate Candidate @relation(fields: [candidateId], references: [id])
   branch    Branch?   @relation(fields: [branchId], references: [id])

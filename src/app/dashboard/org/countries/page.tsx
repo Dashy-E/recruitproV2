@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Globe, Building2, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { Plus, Globe, Building2, ChevronDown, ChevronRight, Loader2, Trash2 } from "lucide-react";
 
 interface Country {
   id: string; name: string; code: string; locationType: string; isActive: boolean;
@@ -36,6 +36,7 @@ export default function CountriesPage() {
   const [form, setForm] = useState({ name: "", code: "", locationType: "OVERSEAS" });
   const [branchForm, setBranchForm] = useState({ name: "", code: "", stateId: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [deletingBranchId, setDeletingBranchId] = useState<string | null>(null);
 
   const fetchCountries = () =>
     fetch("/api/org/countries").then((r) => r.json()).then((d) => { setCountries(d); setLoading(false); });
@@ -68,6 +69,16 @@ export default function CountriesPage() {
   };
 
   const toggle = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  const handleDeleteBranch = async (branchId: string, branchName: string) => {
+    if (!confirm(`Delete branch "${branchName}"? This cannot be undone.`)) return;
+    setDeletingBranchId(branchId);
+    const res = await fetch(`/api/org/branches/${branchId}`, { method: "DELETE" });
+    const data = await res.json();
+    setDeletingBranchId(null);
+    if (!res.ok) { alert(data.error || "Failed to delete branch."); return; }
+    fetchCountries();
+  };
 
   const indiaCountries = countries.filter((c) => c.locationType === "INDIA");
   const overseasCountries = countries.filter((c) => c.locationType === "OVERSEAS");
@@ -122,6 +133,14 @@ export default function CountriesPage() {
                           <Building2 className="h-3 w-3 text-gray-400" />
                           <span className="text-xs text-gray-700">{b.name}</span>
                           <span className="text-xs text-gray-400 font-mono">({b.code})</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteBranch(b.id, b.name); }}
+                            disabled={deletingBranchId === b.id}
+                            className="ml-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-50"
+                            title="Delete branch"
+                          >
+                            {deletingBranchId === b.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -137,6 +156,14 @@ export default function CountriesPage() {
                     <Building2 className="h-3 w-3 text-gray-400" />
                     <span className="text-xs text-gray-700">{b.name}</span>
                     <span className="text-xs text-gray-400 font-mono">({b.code})</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteBranch(b.id, b.name); }}
+                      disabled={deletingBranchId === b.id}
+                      className="ml-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-50"
+                      title="Delete branch"
+                    >
+                      {deletingBranchId === b.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                    </button>
                   </div>
                 ))}
               </div>
