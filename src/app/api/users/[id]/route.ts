@@ -38,11 +38,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (isActive !== undefined) data.isActive = isActive;
   if (password) data.password = await bcrypt.hash(password, 10);
 
-  const user = await prisma.user.update({
-    where: { id },
-    data,
-    select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true, branch: { select: { name: true } }, country: { select: { name: true } } },
-  });
-
-  return NextResponse.json(user);
+  try {
+    const user = await prisma.user.update({
+      where: { id },
+      data,
+      select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true, branch: { select: { name: true } }, country: { select: { name: true } } },
+    });
+    return NextResponse.json(user);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("PATCH /api/users/[id] error:", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }

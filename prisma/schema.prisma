@@ -30,9 +30,10 @@ model Division {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  country Country  @relation(fields: [countryId], references: [id])
-  states  State[]
-  mrfs    MRF[]
+  country  Country  @relation(fields: [countryId], references: [id])
+  states   State[]
+  mrfs     MRF[]
+  branches Branch[]
 
   @@unique([name, countryId])
 }
@@ -52,19 +53,21 @@ model State {
 }
 
 model Branch {
-  id        String   @id @default(cuid())
-  name      String
-  code      String   @unique
-  countryId String
-  stateId   String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  name       String
+  code       String   @unique
+  countryId  String
+  stateId    String?
+  divisionId String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  country Country  @relation(fields: [countryId], references: [id])
-  state   State?   @relation(fields: [stateId], references: [id])
-  users   User[]
-  mrfs    MRF[]
+  country   Country   @relation(fields: [countryId], references: [id])
+  state     State?    @relation(fields: [stateId], references: [id])
+  division  Division? @relation(fields: [divisionId], references: [id])
+  users     User[]
+  mrfs      MRF[]
   employees Employee[]
 }
 
@@ -132,6 +135,7 @@ model User {
   uploadedDocuments      Document[]               @relation("UploadedBy")
   interviews             InterviewRecord[]
   sentEmails             Email[]                  @relation("SentEmails")
+  notifications          Notification[]
 }
 
 model UserCountryAssignment {
@@ -239,6 +243,7 @@ model MRFApprovalRecord {
   id           String   @id @default(cuid())
   mrfId        String
   level        String
+  approverRole String?
   approverId   String?
   approverName String
   status       String   @default("PENDING")
@@ -355,8 +360,9 @@ model Employee {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  candidate Candidate @relation(fields: [candidateId], references: [id])
-  branch    Branch?   @relation(fields: [branchId], references: [id])
+  candidate      Candidate               @relation(fields: [candidateId], references: [id])
+  branch         Branch?                 @relation(fields: [branchId], references: [id])
+  onboardingData EmployeeOnboardingData?
 }
 
 model Email {
@@ -372,4 +378,37 @@ model Email {
 
   from      User       @relation("SentEmails", fields: [fromId], references: [id])
   candidate Candidate? @relation(fields: [candidateId], references: [id])
+}
+
+model EmployeeOnboardingData {
+  id          String   @id @default(cuid())
+  employeeId  String   @unique
+  formData    String
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+}
+
+model WorkflowStage {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  label     String
+  stepOrder Int
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
 }

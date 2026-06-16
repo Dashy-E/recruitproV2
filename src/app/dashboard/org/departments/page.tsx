@@ -3,13 +3,13 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Loader2, Building2 } from "lucide-react";
+import { Plus, Loader2, Building2, Trash2 } from "lucide-react";
 
 interface Department {
   id: string; name: string; isActive: boolean;
-  designations: { id: string; title: string; requiresPsychometric: boolean }[];
+  designations: { id: string; title: string }[];
   _count: { mrfs: number };
 }
 
@@ -19,6 +19,7 @@ export default function DepartmentsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<Record<string, string>>({});
 
   const fetchDepts = () =>
     fetch("/api/org/departments").then((r) => r.json()).then((d) => { setDepartments(d); setLoading(false); });
@@ -35,6 +36,17 @@ export default function DepartmentsPage() {
     setSubmitting(false);
     setShowAdd(false);
     setName("");
+    fetchDepts();
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeleteError((prev) => ({ ...prev, [id]: "" }));
+    const res = await fetch(`/api/org/departments/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json();
+      setDeleteError((prev) => ({ ...prev, [id]: data.error || "Delete failed." }));
+      return;
+    }
     fetchDepts();
   };
 
@@ -60,14 +72,25 @@ export default function DepartmentsPage() {
                     <Building2 className="h-5 w-5 text-blue-600" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-gray-900">{dept.name}</h3>
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold text-gray-900">{dept.name}</h3>
+                      <button
+                        onClick={() => handleDelete(dept.id)}
+                        className="text-gray-300 hover:text-red-500 transition-colors p-1"
+                        title="Delete department"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                     <p className="text-sm text-gray-500 mt-0.5">{dept._count.mrfs} MRFs</p>
+                    {deleteError[dept.id] && (
+                      <p className="text-xs text-red-500 mt-1">{deleteError[dept.id]}</p>
+                    )}
                     <div className="mt-3">
                       <p className="text-xs font-medium text-gray-400 mb-1">DESIGNATIONS ({dept.designations.length})</p>
                       <div className="flex flex-wrap gap-1">
                         {dept.designations.slice(0, 4).map((d) => (
-                          <span key={d.id} className={`rounded-full px-2 py-0.5 text-xs
-                            ${d.requiresPsychometric ? "bg-orange-100 text-orange-700" : "bg-gray-100 text-gray-600"}`}>
+                          <span key={d.id} className="rounded-full px-2 py-0.5 text-xs bg-gray-100 text-gray-600">
                             {d.title}
                           </span>
                         ))}

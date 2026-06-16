@@ -4,13 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2, Trash2 } from "lucide-react";
 
-interface Designation { id: string; title: string; requiresPsychometric: boolean; isActive: boolean; department: { name: string } }
+interface Designation { id: string; title: string; isActive: boolean; department: { name: string } }
 interface Department { id: string; name: string }
 
 export default function DesignationsPage() {
@@ -18,8 +18,9 @@ export default function DesignationsPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ title: "", departmentId: "", requiresPsychometric: false });
+  const [form, setForm] = useState({ title: "", departmentId: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [deleteErrors, setDeleteErrors] = useState<Record<string, string>>({});
 
   const fetchAll = () =>
     Promise.all([
@@ -34,11 +35,22 @@ export default function DesignationsPage() {
     await fetch("/api/org/designations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, requiresPsychometric: false }),
     });
     setSubmitting(false);
     setShowAdd(false);
-    setForm({ title: "", departmentId: "", requiresPsychometric: false });
+    setForm({ title: "", departmentId: "" });
+    fetchAll();
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeleteErrors((prev) => ({ ...prev, [id]: "" }));
+    const res = await fetch(`/api/org/designations/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json();
+      setDeleteErrors((prev) => ({ ...prev, [id]: data.error || "Delete failed." }));
+      return;
+    }
     fetchAll();
   };
 
@@ -47,9 +59,7 @@ export default function DesignationsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Designations</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            {designations.filter((d) => d.requiresPsychometric).length} require psychometric testing
-          </p>
+          <p className="text-sm text-gray-500 mt-1">{designations.length} designations configured</p>
         </div>
         <Button onClick={() => setShowAdd(true)}><Plus className="h-4 w-4" /> Add Designation</Button>
       </div>
@@ -64,9 +74,8 @@ export default function DesignationsPage() {
                 <TableRow>
                   <TableHead>Title</TableHead>
                   <TableHead>Department</TableHead>
-                  <TableHead>Psychometric Test</TableHead>
-                  <TableHead>Chemistry Test</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -75,17 +84,21 @@ export default function DesignationsPage() {
                     <TableCell className="font-medium">{d.title}</TableCell>
                     <TableCell>{d.department.name}</TableCell>
                     <TableCell>
-                      <Badge variant={d.requiresPsychometric ? "warning" : "secondary"}>
-                        {d.requiresPsychometric ? "Required" : "Not Required"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="default">Mandatory (all)</Badge>
-                    </TableCell>
-                    <TableCell>
                       <Badge variant={d.isActive ? "success" : "secondary"}>
                         {d.isActive ? "Active" : "Inactive"}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {deleteErrors[d.id] && (
+                        <span className="text-xs text-red-500 mr-2">{deleteErrors[d.id]}</span>
+                      )}
+                      <button
+                        onClick={() => handleDelete(d.id)}
+                        className="text-gray-300 hover:text-red-500 transition-colors p-1"
+                        title="Delete designation"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -111,19 +124,6 @@ export default function DesignationsPage() {
                   {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                id="psycho"
-                checked={form.requiresPsychometric}
-                onChange={(e) => setForm({ ...form, requiresPsychometric: e.target.checked })}
-                className="h-4 w-4 rounded border-gray-300"
-              />
-              <Label htmlFor="psycho">Requires Psychometric Test</Label>
-            </div>
-            <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-500">
-              Chemistry Test is mandatory for all designations as per current policy.
             </div>
           </div>
           <DialogFooter>

@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import {
   LayoutDashboard, FileText, Users, Building2, Globe, Settings,
-  LogOut, ChevronDown, ClipboardList, BarChart3, FolderOpen, UserCheck, Mail
+  LogOut, ChevronDown, ClipboardList, BarChart3, FolderOpen, UserCheck, Mail, ShieldCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -28,6 +28,12 @@ const navItems: NavItem[] = [
     href: "/dashboard/mrfs",
     icon: ClipboardList,
     roles: ["ADMIN", "HR", "BRANCH_MANAGER", "DIVISIONAL_MANAGER", "FUNCTIONAL_HEAD", "COUNTRY_MANAGER"],
+  },
+  {
+    label: "Approvals",
+    href: "/dashboard/approvals",
+    icon: ShieldCheck,
+    roles: ["ADMIN", "HR", "DIVISIONAL_MANAGER", "FUNCTIONAL_HEAD", "COUNTRY_MANAGER"],
   },
   {
     label: "Candidates",
@@ -59,6 +65,15 @@ const navItems: NavItem[] = [
     ],
   },
   {
+    label: "Settings",
+    href: "/dashboard/settings",
+    icon: Settings,
+    roles: ["ADMIN"],
+    children: [
+      { label: "Workflow Stages", href: "/dashboard/settings/stages" },
+    ],
+  },
+  {
     label: "Users",
     href: "/dashboard/users",
     icon: Users,
@@ -81,12 +96,6 @@ const navItems: NavItem[] = [
     href: "/dashboard/employee-portal",
     icon: UserCheck,
     roles: ["EMPLOYEE"],
-  },
-  {
-    label: "Settings",
-    href: "/dashboard/settings",
-    icon: Settings,
-    roles: ["ADMIN"],
   },
 ];
 

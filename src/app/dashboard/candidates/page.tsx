@@ -206,6 +206,7 @@ function CandidatesContent() {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", mrfId: mrfFilter });
   const [submitting, setSubmitting] = useState(false);
+  const [newCandidatePassword, setNewCandidatePassword] = useState("");
 
   const fetchCandidates = () => {
     const url = mrfFilter ? `/api/candidates?mrfId=${mrfFilter}` : "/api/candidates";
@@ -236,12 +237,16 @@ function CandidatesContent() {
 
   const handleAdd = async () => {
     setSubmitting(true);
-    await fetch("/api/candidates", {
+    const res = await fetch("/api/candidates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
     setSubmitting(false);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.tempPassword) setNewCandidatePassword(data.tempPassword);
+    }
     setShowAdd(false);
     setForm({ firstName: "", lastName: "", email: "", phone: "", mrfId: "" });
     fetchCandidates();
@@ -394,6 +399,23 @@ function CandidatesContent() {
           )}
         </div>
       )}
+
+      {/* Temp Password Dialog — shown after creating a new candidate */}
+      <Dialog open={!!newCandidatePassword} onOpenChange={(o) => !o && setNewCandidatePassword("")}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Candidate Account Created</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-gray-600">The candidate can log in with their email and this temporary password:</p>
+            <div className="rounded-md bg-gray-900 px-4 py-3 font-mono text-lg text-green-400 tracking-widest text-center">
+              {newCandidatePassword}
+            </div>
+            <p className="text-xs text-gray-400">Share this with the candidate. They should change it after first login via the Edit Candidate dialog.</p>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setNewCandidatePassword("")}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Candidate Dialog */}
       <Dialog open={showAdd} onOpenChange={setShowAdd}>

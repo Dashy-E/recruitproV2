@@ -77,6 +77,30 @@ export async function POST(req: NextRequest) {
       justification,
       status: "PENDING_DIVISIONAL",
       createdById: userId!,
+      // Extended MRF fields
+      vacancyType: body.vacancyType || null,
+      replacedEmployeeName: body.replacedEmployeeName || null,
+      replacedEmployeeCTC: body.replacedEmployeeCTC || null,
+      replacementFor: body.replacementFor || null,
+      replacementReason: body.replacementReason || null,
+      replacementNecessityReason: body.replacementNecessityReason || null,
+      isNewRole: body.isNewRole || false,
+      isBusinessExpansion: body.isBusinessExpansion || false,
+      newRoleJustification: body.newRoleJustification || null,
+      isBudgeted: body.isBudgeted ?? null,
+      proposedGrade: body.proposedGrade || null,
+      ctcRange: body.ctcRange || null,
+      location: body.location || null,
+      reportingTo: body.reportingTo || null,
+      jobProfile: body.jobProfile || null,
+      minAge: body.minAge || null,
+      maxAge: body.maxAge || null,
+      minQualification: body.minQualification || null,
+      preferredQualification: body.preferredQualification || null,
+      workExperience: body.workExperience || null,
+      industryBackground: body.industryBackground || null,
+      otherSpecs: body.otherSpecs || null,
+      contributionJustified: body.contributionJustified || false,
     },
     include: {
       country: true,
@@ -85,6 +109,25 @@ export async function POST(req: NextRequest) {
       createdBy: { select: { name: true } },
     },
   });
+
+  // Notify Divisional Managers that a new MRF needs approval
+  const divisionalManagers = await prisma.user.findMany({
+    where: { role: "DIVISIONAL_MANAGER", isActive: true },
+    select: { id: true },
+  });
+  await Promise.all(
+    divisionalManagers.map((mgr) =>
+      prisma.notification.create({
+        data: {
+          userId: mgr.id,
+          type: "MRF_APPROVAL",
+          title: `New MRF ${mrf.mrfNumber} requires your approval`,
+          message: `"${mrf.title}" has been submitted and is awaiting divisional approval.`,
+          link: `/dashboard/approvals`,
+        },
+      })
+    )
+  );
 
   return NextResponse.json(mrf, { status: 201 });
 }

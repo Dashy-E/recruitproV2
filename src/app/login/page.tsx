@@ -13,6 +13,7 @@ const QUICK_ACCOUNTS = [
   { label: "HR", email: "hr@recruitpro.com", password: "hr123", color: "bg-blue-600 hover:bg-blue-700 text-white" },
   { label: "Branch Mgr", email: "bm@recruitpro.com", password: "bm123", color: "bg-green-600 hover:bg-green-700 text-white" },
   { label: "Div. Manager", email: "dm@recruitpro.com", password: "dm123", color: "bg-yellow-600 hover:bg-yellow-700 text-white" },
+  { label: "Univ. Manager", email: "um@recruitpro.com", password: "um123", color: "bg-indigo-600 hover:bg-indigo-700 text-white" },
   { label: "Candidate", email: "candidate@recruitpro.com", password: "candidate123", color: "bg-gray-600 hover:bg-gray-700 text-white" },
   { label: "Employee", email: "employee@recruitpro.com", password: "emp123", color: "bg-teal-600 hover:bg-teal-700 text-white" },
 ];
@@ -74,7 +75,7 @@ export default function LoginPage() {
             <CardDescription className="text-xs">Click a role to log in instantly with demo credentials</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               {QUICK_ACCOUNTS.map((account) => (
                 <button
                   key={account.label}

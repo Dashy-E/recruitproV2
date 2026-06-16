@@ -21,12 +21,52 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 
-  const doc = await prisma.document.update({
-    where: { id },
-    data: { approvalStatus, approvalNotes: approvalNotes || null },
-  });
+  const docs = await prisma.$queryRawUnsafe<any[]>(
+    `SELECT d.*, c.userId FROM Document d LEFT JOIN Candidate c ON c.id = d.candidateId WHERE d.id = ?`, id
+  );
+  if (!docs.length) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const doc = docs[0];
 
-  return NextResponse.json(doc);
+  if (approvalStatus === "REJECTED") {
+    // Delete physical file
+    try {
+      const filename = doc.fileUrl?.split("/uploads/")[1];
+      if (filename) await unlink(join(process.cwd(), "public", "uploads", filename));
+    } catch { /* file may already be missing */ }
+
+    // Delete DB record
+    await prisma.$queryRawUnsafe(`DELETE FROM Document WHERE id = ?`, id);
+
+    // Notify the document owner
+    if (doc.userId) {
+      const userRows = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT role FROM User WHERE id = ?`, doc.userId
+      );
+      const ownerRole = userRows[0]?.role || "CANDIDATE";
+      const notifLink = ownerRole === "EMPLOYEE" ? "/dashboard/employee-portal" : "/dashboard";
+      const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const now = new Date().toISOString();
+      const reason = approvalNotes ? ` Reason: ${approvalNotes}` : "";
+      await prisma.$queryRawUnsafe(
+        `INSERT INTO Notification (id, userId, title, message, link, isRead, createdAt) VALUES (?, ?, ?, ?, ?, 0, ?)`,
+        notifId, doc.userId,
+        "Document Rejected — Please Re-upload",
+        `Your document "${doc.name}" was rejected and removed.${reason} Please upload a replacement.`,
+        notifLink, now
+      );
+    }
+
+    return NextResponse.json({ success: true, deleted: true });
+  }
+
+  // APPROVED — just update status
+  await prisma.$queryRawUnsafe(
+    `UPDATE Document SET approvalStatus = ?, approvalNotes = ? WHERE id = ?`,
+    approvalStatus,
+    approvalNotes || null,
+    id
+  );
+  return NextResponse.json({ success: true });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -40,17 +80,15 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
   const { id } = await params;
 
-  const doc = await prisma.document.findUnique({ where: { id } });
-  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const docs = await prisma.$queryRawUnsafe<any[]>(`SELECT * FROM Document WHERE id = ?`, id);
+  if (!docs.length) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const doc = docs[0];
 
-  // Remove physical file (best-effort — don't fail the request if already gone)
   try {
-    const filename = doc.fileUrl.split("/uploads/")[1];
+    const filename = doc.fileUrl?.split("/uploads/")[1];
     if (filename) await unlink(join(process.cwd(), "public", "uploads", filename));
-  } catch {
-    // file may already be missing
-  }
+  } catch { /* file may already be missing */ }
 
-  await prisma.document.delete({ where: { id } });
+  await prisma.$queryRawUnsafe(`DELETE FROM Document WHERE id = ?`, id);
   return NextResponse.json({ success: true });
 }

@@ -7,13 +7,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Loader2, UserCheck } from "lucide-react";
+import { Plus, Loader2, UserCheck, Eye, FileText, ClipboardList } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
 interface Branch { id: string; name: string; code: string }
 
 interface Employee {
   id: string;
+  candidateId: string;
   employeeCode: string;
   joiningDate: string;
   department: string | null;
@@ -21,6 +22,7 @@ interface Employee {
   ctc: number | null;
   reportingTo: string | null;
   isActive: boolean;
+  onboardingStep: number;
   candidate: {
     firstName: string;
     lastName: string;
@@ -40,6 +42,55 @@ interface JoinedCandidate {
   employee: null | { id: string };
 }
 
+interface OnboardingDoc {
+  id: string;
+  name: string;
+  fileUrl: string;
+  documentType: string;
+  approvalStatus: string;
+  createdAt: string;
+}
+
+interface OnboardingFormData {
+  formData: Record<string, string>;
+  education: Array<Record<string, string>>;
+  employment: Array<Record<string, string>>;
+  submittedAt: string;
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  emergencyContactName: "Emergency Contact",
+  emergencyContactPhone: "Emergency Phone",
+  emergencyContactRelation: "Relation",
+  bankAccountNumber: "Bank Account No.",
+  bankName: "Bank Name",
+  ifscCode: "IFSC Code",
+  panNumber: "PAN",
+  aadhaarLast4: "Aadhaar (Last 4)",
+  permanentAddress: "Permanent Address",
+  bloodGroup: "Blood Group",
+  fatherName: "Father's Name",
+  motherName: "Mother's Name",
+  spouseName: "Spouse Name",
+  maritalStatus: "Marital Status",
+  dateOfBirth: "Date of Birth",
+  nationality: "Nationality",
+  religion: "Religion",
+  category: "Category",
+  localAddress: "Local Address",
+  pinCode: "Pin Code",
+  city: "City",
+  state: "State",
+  passportNumber: "Passport No.",
+  passportExpiry: "Passport Expiry",
+  pfAccountNumber: "PF Account No.",
+  esiNumber: "ESI No.",
+  referenceContactName: "Reference Contact",
+  referenceContactPhone: "Reference Phone",
+  referenceContactRelation: "Reference Relation",
+  declarationDate: "Declaration Date",
+};
+
 export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,6 +107,12 @@ export default function EmployeesPage() {
     branchId: "",
   });
   const [submitting, setSubmitting] = useState(false);
+
+  // Onboarding data view
+  const [viewEmp, setViewEmp] = useState<Employee | null>(null);
+  const [onboardingData, setOnboardingData] = useState<OnboardingFormData | null>(null);
+  const [onboardingDocs, setOnboardingDocs] = useState<OnboardingDoc[]>([]);
+  const [viewLoading, setViewLoading] = useState(false);
 
   const fetchEmployees = () => {
     fetch("/api/employees")
@@ -95,6 +152,44 @@ export default function EmployeesPage() {
     fetchEmployees();
   };
 
+  const openView = async (emp: Employee) => {
+    setViewEmp(emp);
+    setOnboardingData(null);
+    setOnboardingDocs([]);
+    setViewLoading(true);
+
+    const [dataRes, docsRes] = await Promise.all([
+      fetch(`/api/employees/${emp.id}/onboarding-data`),
+      fetch(`/api/documents?candidateId=${emp.candidateId}`),
+    ]);
+
+    if (dataRes.ok) {
+      const d = await dataRes.json();
+      if (d && d.formData) {
+        // API returns { ...row, formData: parsedJSON }
+        // parsedJSON contains { formData: {...}, education: [...], employment: [...] }
+        const parsed = typeof d.formData === "object" ? d.formData : {};
+        setOnboardingData({
+          formData: parsed.formData || {},
+          education: Array.isArray(parsed.education) ? parsed.education : [],
+          employment: Array.isArray(parsed.employment) ? parsed.employment : [],
+          submittedAt: d.submittedAt || d.updatedAt || "",
+        });
+      }
+    }
+    if (docsRes.ok) {
+      const d = await docsRes.json();
+      setOnboardingDocs(Array.isArray(d) ? d : []);
+    }
+    setViewLoading(false);
+  };
+
+  const STATUS_BADGE: Record<string, string> = {
+    PENDING: "bg-yellow-100 text-yellow-700",
+    APPROVED: "bg-green-100 text-green-700",
+    REJECTED: "bg-red-100 text-red-700",
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -128,6 +223,8 @@ export default function EmployeesPage() {
                   <TableHead>Branch</TableHead>
                   <TableHead>Joining Date</TableHead>
                   <TableHead>CTC</TableHead>
+                  <TableHead>Onboarding</TableHead>
+                  <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -144,6 +241,20 @@ export default function EmployeesPage() {
                     <TableCell className="text-sm text-gray-600">{formatDate(emp.joiningDate)}</TableCell>
                     <TableCell className="text-sm">
                       {emp.ctc != null ? `₹${emp.ctc.toLocaleString("en-IN")}` : "—"}
+                    </TableCell>
+                    <TableCell>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        emp.onboardingStep >= 2 ? "bg-green-100 text-green-700" :
+                        emp.onboardingStep === 1 ? "bg-yellow-100 text-yellow-700" :
+                        "bg-gray-100 text-gray-500"
+                      }`}>
+                        {emp.onboardingStep >= 2 ? "Complete" : emp.onboardingStep === 1 ? "In Progress" : "Not Started"}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="sm" onClick={() => openView(emp)} className="text-xs gap-1">
+                        <Eye className="h-3.5 w-3.5" /> View
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -216,6 +327,155 @@ export default function EmployeesPage() {
               {submitting && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
               Create Employee Record
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Employee Onboarding Dialog */}
+      <Dialog open={!!viewEmp} onOpenChange={(o) => !o && setViewEmp(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {viewEmp ? `${viewEmp.candidate.firstName} ${viewEmp.candidate.lastName}` : "Employee"} — Onboarding Details
+            </DialogTitle>
+            {viewEmp && (
+              <p className="text-sm text-gray-500">{viewEmp.employeeCode} · {viewEmp.candidate.email}</p>
+            )}
+          </DialogHeader>
+
+          {viewLoading ? (
+            <div className="py-12 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-gray-400" /></div>
+          ) : (
+            <div className="space-y-5 py-2">
+              {/* Onboarding form data */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <ClipboardList className="h-4 w-4 text-gray-500" />
+                  <h3 className="text-sm font-semibold text-gray-800">Submitted Form Data</h3>
+                  {onboardingData && (
+                    <span className="text-xs text-gray-400">· Submitted {formatDate(onboardingData.submittedAt)}</span>
+                  )}
+                </div>
+                {!onboardingData ? (
+                  <div className="rounded-lg bg-gray-50 border border-dashed border-gray-200 p-6 text-center text-sm text-gray-400">
+                    Employee has not submitted the onboarding form yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Core fields */}
+                    {Object.keys(onboardingData.formData).length > 0 && (
+                      <div className="rounded-lg border border-gray-200 p-3">
+                        <p className="text-xs font-semibold text-gray-500 mb-2 uppercase">Personal & Banking</p>
+                        <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
+                          {Object.entries(onboardingData.formData).map(([key, val]) => (
+                            val ? (
+                              <div key={key}>
+                                <dt className="text-xs text-gray-400">{FIELD_LABELS[key] || key}</dt>
+                                <dd className="text-sm text-gray-800 font-medium">{val}</dd>
+                              </div>
+                            ) : null
+                          ))}
+                        </dl>
+                      </div>
+                    )}
+
+                    {/* Education */}
+                    {onboardingData.education.length > 0 && (
+                      <div className="rounded-lg border border-gray-200 p-3">
+                        <p className="text-xs font-semibold text-gray-500 mb-2 uppercase">Education</p>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-gray-400 border-b">
+                              <th className="pb-1 text-left font-medium">Institute</th>
+                              <th className="pb-1 text-left font-medium">Exam/Degree</th>
+                              <th className="pb-1 text-left font-medium">Year</th>
+                              <th className="pb-1 text-left font-medium">%</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {onboardingData.education.map((row, i) => (
+                              <tr key={i}>
+                                <td className="py-1 pr-2">{row.institute || "—"}</td>
+                                <td className="py-1 pr-2">{row.exam || "—"}</td>
+                                <td className="py-1 pr-2">{row.year || "—"}</td>
+                                <td className="py-1">{row.percentage || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Employment */}
+                    {onboardingData.employment.length > 0 && (
+                      <div className="rounded-lg border border-gray-200 p-3">
+                        <p className="text-xs font-semibold text-gray-500 mb-2 uppercase">Employment History</p>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-gray-400 border-b">
+                              <th className="pb-1 text-left font-medium">Employer</th>
+                              <th className="pb-1 text-left font-medium">From</th>
+                              <th className="pb-1 text-left font-medium">To</th>
+                              <th className="pb-1 text-left font-medium">Role</th>
+                              <th className="pb-1 text-left font-medium">CTC</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {onboardingData.employment.map((row, i) => (
+                              <tr key={i}>
+                                <td className="py-1 pr-2">{row.employer || "—"}</td>
+                                <td className="py-1 pr-2">{row.from || "—"}</td>
+                                <td className="py-1 pr-2">{row.to || "—"}</td>
+                                <td className="py-1 pr-2">{row.role || "—"}</td>
+                                <td className="py-1">{row.lastCTC || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Uploaded Documents */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <FileText className="h-4 w-4 text-gray-500" />
+                  <h3 className="text-sm font-semibold text-gray-800">Uploaded Documents</h3>
+                  <span className="text-xs text-gray-400">({onboardingDocs.length})</span>
+                </div>
+                {onboardingDocs.length === 0 ? (
+                  <div className="rounded-lg bg-gray-50 border border-dashed border-gray-200 p-6 text-center text-sm text-gray-400">
+                    No documents uploaded.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                    {onboardingDocs.map((doc) => (
+                      <div key={doc.id} className="flex items-center gap-3 px-3 py-2">
+                        <FileText className="h-4 w-4 text-gray-400 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                            className="text-sm text-blue-600 hover:underline truncate block">{doc.name}</a>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-xs text-gray-400">{doc.documentType.replace(/_/g, " ")}</span>
+                            <span className="text-xs text-gray-300">·</span>
+                            <span className="text-xs text-gray-400">{formatDate(doc.createdAt)}</span>
+                          </div>
+                        </div>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${STATUS_BADGE[doc.approvalStatus] || "bg-gray-100 text-gray-600"}`}>
+                          {doc.approvalStatus}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewEmp(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

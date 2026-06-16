@@ -49,6 +49,10 @@ export default async function DashboardPage() {
       },
     });
 
+    const candidateNotifications = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT * FROM Notification WHERE userId = ? ORDER BY createdAt DESC LIMIT 10`, userId
+    );
+
     // If candidate has an employee record, show Employee Portal view
     if (candidate?.employee) {
       const emp = candidate.employee;
@@ -93,6 +97,24 @@ export default async function DashboardPage() {
           <h2 className="text-2xl font-bold">Welcome back, {session?.user?.name}!</h2>
           <p className="mt-1 text-blue-100">Track your recruitment progress below.</p>
         </div>
+
+        {/* Notifications */}
+        {candidateNotifications.length > 0 && (
+          <div className="space-y-2">
+            {candidateNotifications.map((n: any) => (
+              <div key={n.id} className={`rounded-lg border px-4 py-3 flex items-start gap-3 ${
+                n.isRead ? "border-gray-200 bg-gray-50" : "border-yellow-300 bg-yellow-50"
+              }`}>
+                <span className={`mt-0.5 h-2 w-2 rounded-full shrink-0 ${n.isRead ? "bg-gray-300" : "bg-yellow-500"}`} />
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium ${n.isRead ? "text-gray-600" : "text-gray-900"}`}>{n.title}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{n.message}</p>
+                </div>
+                <span className="text-xs text-gray-400 shrink-0">{new Date(n.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {candidate ? (
           <>

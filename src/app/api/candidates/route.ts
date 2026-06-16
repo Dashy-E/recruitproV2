@@ -49,9 +49,10 @@ export async function POST(req: NextRequest) {
   const existingUser = await prisma.user.findUnique({ where: { email } });
   let userId = existingUser?.id;
 
+  let tempPassword: string | undefined;
   if (!existingUser) {
     const bcrypt = await import("bcryptjs");
-    const tempPassword = Math.random().toString(36).slice(-8);
+    tempPassword = Math.random().toString(36).slice(-8);
     const user = await prisma.user.create({
       data: {
         name: `${firstName} ${lastName}`,
@@ -79,5 +80,5 @@ export async function POST(req: NextRequest) {
     include: { user: { select: { name: true } }, mrf: true },
   });
 
-  return NextResponse.json(candidate, { status: 201 });
+  return NextResponse.json({ ...candidate, tempPassword }, { status: 201 });
 }

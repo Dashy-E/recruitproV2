@@ -9,27 +9,57 @@ export async function GET(req: NextRequest) {
   const stateId = searchParams.get("stateId");
   const divisionId = searchParams.get("divisionId");
 
-  if (divisionId) {
-    const states = await prisma.state.findMany({ where: { divisionId } });
-    const stateIds = states.map((s) => s.id);
-    const branches = await prisma.branch.findMany({
-      where: { stateId: { in: stateIds }, isActive: true },
-      orderBy: { name: "asc" },
-    });
+  try {
+    if (divisionId) {
+      // Fetch branches that belong to this division's states OR directly to this division
+      const states = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT id FROM State WHERE divisionId = ?`, divisionId
+      );
+      const stateIds = states.map((s: any) => s.id);
+
+      let branches: any[];
+      if (stateIds.length > 0) {
+        const placeholders = stateIds.map(() => "?").join(", ");
+        branches = await prisma.$queryRawUnsafe<any[]>(
+          `SELECT * FROM Branch WHERE isActive = 1 AND (stateId IN (${placeholders}) OR divisionId = ?) ORDER BY name ASC`,
+          ...stateIds, divisionId
+        );
+      } else {
+        branches = await prisma.$queryRawUnsafe<any[]>(
+          `SELECT * FROM Branch WHERE isActive = 1 AND divisionId = ? ORDER BY name ASC`,
+          divisionId
+        );
+      }
+      return NextResponse.json(branches);
+    }
+
+    if (stateId) {
+      const branches = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM Branch WHERE isActive = 1 AND stateId = ? ORDER BY name ASC`,
+        stateId
+      );
+      return NextResponse.json(branches);
+    }
+
+    if (countryId) {
+      const branches = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM Branch WHERE isActive = 1 AND countryId = ? ORDER BY name ASC`,
+        countryId
+      );
+      return NextResponse.json(branches);
+    }
+
+    // No filter — return all active branches
+    const branches = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT * FROM Branch WHERE isActive = 1 ORDER BY name ASC`
+    );
     return NextResponse.json(branches);
+
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("GET /api/org/branches error:", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
-
-  const branches = await prisma.branch.findMany({
-    where: {
-      ...(countryId ? { countryId } : {}),
-      ...(stateId ? { stateId } : {}),
-      isActive: true,
-    },
-    include: { state: true, country: true },
-    orderBy: { name: "asc" },
-  });
-
-  return NextResponse.json(branches);
 }
 
 export async function POST(req: NextRequest) {

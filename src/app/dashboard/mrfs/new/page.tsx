@@ -78,8 +78,8 @@ export default function NewMRFPage() {
   const designations = departments.find((d) => d.id === selectedDepartment)?.designations || [];
 
   useEffect(() => {
-    fetch("/api/org/countries").then((r) => r.json()).then(setCountries);
-    fetch("/api/org/departments").then((r) => r.json()).then(setDepartments);
+    fetch("/api/org/countries").then((r) => r.json()).then((d) => setCountries(Array.isArray(d) ? d : []));
+    fetch("/api/org/departments").then((r) => r.json()).then((d) => setDepartments(Array.isArray(d) ? d : []));
   }, []);
 
   useEffect(() => {
@@ -89,24 +89,24 @@ export default function NewMRFPage() {
 
     if (isIndia) {
       fetch(`/api/org/divisions?countryId=${selectedCountry}`)
-        .then((r) => r.json()).then(setDivisions);
-    } else if (isCorporate) {
+        .then((r) => r.json()).then((d) => setDivisions(Array.isArray(d) ? d : []));
+    } else {
+      // Overseas and Corporate: load branches by countryId
       fetch(`/api/org/branches?countryId=${selectedCountry}`)
-        .then((r) => r.json()).then(setBranches);
+        .then((r) => r.json()).then((d) => setBranches(Array.isArray(d) ? d : []));
     }
-  }, [selectedCountry, isIndia, isCorporate]);
+  }, [selectedCountry, isIndia]);
 
   useEffect(() => {
     if (!selectedDivision) return;
     setSelectedBranch(""); setBranches([]);
     fetch(`/api/org/branches?divisionId=${selectedDivision}`)
-      .then((r) => r.json()).then(setBranches);
+      .then((r) => r.json()).then((d) => setBranches(Array.isArray(d) ? d : []));
   }, [selectedDivision]);
 
   const isValid = () => {
     if (!title || !selectedCountry || !selectedDepartment) return false;
     if (isIndia && (!selectedDivision || !selectedBranch)) return false;
-    if (isCorporate && !selectedBranch) return false;
     if (!vacancyType) return false;
     return true;
   };
@@ -244,12 +244,6 @@ export default function NewMRFPage() {
               </Select>
             </div>
 
-            {isOverseas && (
-              <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-700">
-                International postings do not require a specific branch/office.
-              </div>
-            )}
-
             {isIndia && (
               <>
                 <div className="space-y-2">
@@ -276,13 +270,16 @@ export default function NewMRFPage() {
               </>
             )}
 
-            {isCorporate && (
+            {(isCorporate || isOverseas) && (
               <div className="space-y-2">
-                <Label>Office *</Label>
+                <Label>Branch / Office</Label>
                 <Select onValueChange={setSelectedBranch} disabled={!selectedCountry}>
-                  <SelectTrigger><SelectValue placeholder="Select office" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder={branches.length === 0 ? "No branches configured" : "Select branch (optional)"} /></SelectTrigger>
                   <SelectContent>
-                    {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.code})</SelectItem>)}
+                    {branches.length === 0
+                      ? <SelectItem value="__none" disabled>No branches yet</SelectItem>
+                      : branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.code})</SelectItem>)
+                    }
                   </SelectContent>
                 </Select>
               </div>

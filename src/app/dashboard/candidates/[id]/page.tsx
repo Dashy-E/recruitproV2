@@ -53,6 +53,7 @@ export default function CandidateDetailPage() {
   const [stageDialog, setStageDialog] = useState(false);
   const [toStage, setToStage] = useState("");
   const [notes, setNotes] = useState("");
+  const [workflowStages, setWorkflowStages] = useState<{ id: string; key: string; label: string; stepOrder: number }[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [docType, setDocType] = useState("RECRUITMENT");
@@ -80,6 +81,7 @@ export default function CandidateDetailPage() {
     fetchCandidate();
     fetchDocs();
     fetch("/api/mrfs").then((r) => r.json()).then((d) => setMrfs(Array.isArray(d) ? d : []));
+    fetch("/api/workflow-stages").then((r) => r.json()).then((d) => setWorkflowStages(Array.isArray(d) ? d : []));
   }, [id]);
 
   const openEdit = () => {
@@ -201,9 +203,9 @@ export default function CandidateDetailPage() {
             <Pencil className="h-4 w-4" /> Edit
           </Button>
         )}
-        {canManage && candidate.currentStage !== "ONBOARDED" && (
-          <Button onClick={() => setStageDialog(true)}>
-            <ChevronRight className="h-4 w-4" /> Advance Stage
+        {canManage && (
+          <Button onClick={() => { setToStage(""); setNotes(""); setStageDialog(true); }}>
+            <ChevronRight className="h-4 w-4" /> Change Stage
           </Button>
         )}
       </div>
@@ -457,29 +459,52 @@ export default function CandidateDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Advance Stage Dialog */}
+      {/* Change Stage Dialog — bidirectional */}
       <Dialog open={stageDialog} onOpenChange={setStageDialog}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Advance Candidate Stage</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Change Candidate Stage</DialogTitle>
+            <p className="text-sm text-gray-500 mt-1">
+              Current: <span className="font-medium text-gray-800">{currentStageInfo?.label || candidate.currentStage}</span>
+            </p>
+          </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-700">
-              Candidates can only move forward. This action is final.
-            </div>
             <div className="space-y-2">
               <Label>Move to Stage *</Label>
-              <Select onValueChange={setToStage}>
-                <SelectTrigger><SelectValue placeholder="Select next stage" /></SelectTrigger>
+              <Select value={toStage} onValueChange={setToStage}>
+                <SelectTrigger><SelectValue placeholder="Select stage…" /></SelectTrigger>
                 <SelectContent>
-                  {nextStages.map((s) => (
-                    <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
-                  ))}
+                  {(workflowStages.length > 0 ? workflowStages : CANDIDATE_STAGES.map((s) => ({ key: s.key, label: s.label, stepOrder: s.step, id: s.key }))).map((s) => {
+                    const isCurrent = s.key === candidate.currentStage;
+                    const activeStages = workflowStages.length > 0 ? workflowStages : CANDIDATE_STAGES.map((cs) => ({ key: cs.key, stepOrder: cs.step }));
+                    const currentOrder = activeStages.find((a) => a.key === candidate.currentStage)?.stepOrder ?? 0;
+                    const direction = s.stepOrder > currentOrder ? "↑" : s.stepOrder < currentOrder ? "↓" : "";
+                    return (
+                      <SelectItem key={s.key} value={s.key} disabled={isCurrent}>
+                        {direction && <span className={`mr-1 text-xs ${direction === "↑" ? "text-green-600" : "text-orange-500"}`}>{direction}</span>}
+                        {s.label}{isCurrent ? " (current)" : ""}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
+            {toStage && toStage !== candidate.currentStage && (() => {
+              const activeStages = workflowStages.length > 0 ? workflowStages : CANDIDATE_STAGES.map((cs) => ({ key: cs.key, stepOrder: cs.step }));
+              const currentOrder = activeStages.find((a) => a.key === candidate.currentStage)?.stepOrder ?? 0;
+              const targetOrder = activeStages.find((a) => a.key === toStage)?.stepOrder ?? 0;
+              const isBack = targetOrder < currentOrder;
+              const isSkip = targetOrder > currentOrder + 1;
+              return (isBack || isSkip) ? (
+                <div className={`rounded-lg border p-3 text-sm ${isBack ? "bg-orange-50 border-orange-200 text-orange-700" : "bg-blue-50 border-blue-200 text-blue-700"}`}>
+                  {isBack ? "⚠ Moving backward — this will reopen a previous stage." : "⏩ Skipping one or more stages."}
+                </div>
+              ) : null;
+            })()}
             <div className="space-y-2">
-              <Label>Notes</Label>
+              <Label>Notes / Reason</Label>
               <Textarea
-                placeholder="Interview result, test score, reason..."
+                placeholder="Interview result, correction reason, notes…"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={3}
@@ -488,9 +513,9 @@ export default function CandidateDetailPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setStageDialog(false)}>Cancel</Button>
-            <Button onClick={handleStageChange} disabled={!toStage || submitting}>
+            <Button onClick={handleStageChange} disabled={!toStage || toStage === candidate.currentStage || submitting}>
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              Advance Stage
+              Update Stage
             </Button>
           </DialogFooter>
         </DialogContent>
