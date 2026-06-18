@@ -47,12 +47,14 @@ async function sendApprovalEmail(toEmail: string, toName: string, mrfNumber: str
 }
 
 async function createNotification(userId: string, title: string, message: string, link: string) {
-  const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const now = new Date().toISOString();
-  await prisma.$queryRawUnsafe(
-    `INSERT INTO Notification (id, userId, title, message, link, isRead, createdAt) VALUES (?, ?, ?, ?, ?, 0, ?)`,
-    notifId, userId, title, message, link, now
-  );
+  try {
+    const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const now = new Date().toISOString();
+    await prisma.$queryRawUnsafe(
+      `INSERT INTO Notification (id, userId, type, title, message, link, isRead, createdAt) VALUES (?, ?, 'MRF_APPROVAL', ?, ?, ?, 0, ?)`,
+      notifId, userId, title, message, link, now
+    );
+  } catch { /* notification failure is non-fatal */ }
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -65,7 +67,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { id } = await params;
   const body = await req.json();
-  const { action, approverName, notes } = body;
+  const { action, approverName, approverDesignation, notes } = body;
 
   const mrfRows = await prisma.$queryRawUnsafe<any[]>(
     `SELECT m.*, u.name as createdByName FROM MRF m JOIN User u ON u.id = m.createdById WHERE m.id = ?`, id
@@ -94,11 +96,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (action === "approve") {
     const nextStatus = STATUS_FLOW[mrf.status];
 
-    // Create approval record (raw SQL — approverRole field added in migration)
+    // Create approval record (raw SQL — approverRole, approverDesignation added in migrations)
     await prisma.$queryRawUnsafe(
-      `INSERT INTO MRFApprovalRecord (id, mrfId, level, approverRole, approverName, approverId, status, notes, recordedById, recordedAt)
-       VALUES (?, ?, ?, ?, ?, ?, 'APPROVED', ?, ?, ?)`,
+      `INSERT INTO MRFApprovalRecord (id, mrfId, level, approverRole, approverName, approverDesignation, approverId, status, notes, recordedById, recordedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'APPROVED', ?, ?, ?)`,
       recordId, id, currentLevel, role, resolvedApproverName,
+      approverDesignation || null,
       isManagerForThisLevel ? userId : null,
       notes || null, userId, now
     );
@@ -110,49 +113,46 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       ...(approvedAt ? [nextStatus, now, approvedAt, id] : [nextStatus, now, id])
     );
 
-    if (nextStatus !== "APPROVED") {
-      const notifyRole = NOTIFY_ROLE_FOR_STATUS[nextStatus];
-
-      // Find next-level approvers AND all COUNTRY_MANAGERs (universal managers)
-      // De-duplicate so COUNTRY_MANAGERs don't get two notifs when they're also the next approver
-      const nextApprovers = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT id, email, name FROM User WHERE isActive = 1 AND role = ?`, notifyRole
-      );
-      const universalManagers = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT id, email, name FROM User WHERE isActive = 1 AND role = 'COUNTRY_MANAGER'`
-      );
-
-      // Merge, deduplicating by id
-      const seen = new Set<string>();
-      const allRecipients: any[] = [];
-      for (const u of [...nextApprovers, ...universalManagers]) {
-        if (!seen.has(u.id)) { seen.add(u.id); allRecipients.push(u); }
-      }
-
-      await Promise.all(allRecipients.map(async (approver) => {
-        await createNotification(
-          approver.id,
-          `MRF ${mrf.mrfNumber} awaiting your approval`,
-          `"${mrf.title}" has been approved at ${currentLevel.replace(/_/g, " ")} level and requires your review.`,
-          `/dashboard/approvals`
+    // Notifications and emails are non-fatal — DB changes above are already committed
+    try {
+      if (nextStatus !== "APPROVED") {
+        const notifyRole = NOTIFY_ROLE_FOR_STATUS[nextStatus];
+        const nextApprovers = await prisma.$queryRawUnsafe<any[]>(
+          `SELECT id, email, name FROM User WHERE isActive = 1 AND role = ?`, notifyRole
         );
-        await sendApprovalEmail(approver.email, approver.name, mrf.mrfNumber, mrf.title);
-      }));
-    } else {
-      // MRF fully approved — notify the MRF creator
-      await createNotification(
-        mrf.createdById,
-        `MRF ${mrf.mrfNumber} approved`,
-        `Your MRF "${mrf.title}" has been fully approved.`,
-        `/dashboard/mrfs/${id}`
-      );
-    }
+        const universalManagers = await prisma.$queryRawUnsafe<any[]>(
+          `SELECT id, email, name FROM User WHERE isActive = 1 AND role = 'COUNTRY_MANAGER'`
+        );
+        const seen = new Set<string>();
+        const allRecipients: any[] = [];
+        for (const u of [...nextApprovers, ...universalManagers]) {
+          if (!seen.has(u.id)) { seen.add(u.id); allRecipients.push(u); }
+        }
+        await Promise.all(allRecipients.map(async (approver) => {
+          await createNotification(
+            approver.id,
+            `MRF ${mrf.mrfNumber} awaiting your approval`,
+            `"${mrf.title}" has been approved at ${currentLevel.replace(/_/g, " ")} level and requires your review.`,
+            `/dashboard/approvals`
+          );
+          await sendApprovalEmail(approver.email, approver.name, mrf.mrfNumber, mrf.title);
+        }));
+      } else {
+        await createNotification(
+          mrf.createdById,
+          `MRF ${mrf.mrfNumber} approved`,
+          `Your MRF "${mrf.title}" has been fully approved.`,
+          `/dashboard/mrfs/${id}`
+        );
+      }
+    } catch { /* notification/email failure is non-fatal */ }
 
   } else if (action === "reject") {
     await prisma.$queryRawUnsafe(
-      `INSERT INTO MRFApprovalRecord (id, mrfId, level, approverRole, approverName, approverId, status, notes, recordedById, recordedAt)
-       VALUES (?, ?, ?, ?, ?, ?, 'REJECTED', ?, ?, ?)`,
+      `INSERT INTO MRFApprovalRecord (id, mrfId, level, approverRole, approverName, approverDesignation, approverId, status, notes, recordedById, recordedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'REJECTED', ?, ?, ?)`,
       recordId, id, currentLevel, role, resolvedApproverName,
+      approverDesignation || null,
       isManagerForThisLevel ? userId : null,
       notes || null, userId, now
     );

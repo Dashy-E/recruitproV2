@@ -10,13 +10,24 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, CheckCircle, XCircle, Clock, Users, Loader2 } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Clock, Users, Loader2, Send, Printer, RefreshCw, Pencil } from "lucide-react";
 import { formatDate, MRF_STATUSES, CANDIDATE_STAGES } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 
 interface MRFDetail {
   id: string; mrfNumber: string; title: string; status: string;
   vacancyCount: number; justification: string;
+  fillerName: string | null; fillerDesignation: string | null; ctcRange: string | null;
+  location: string | null; reportingTo: string | null; jobProfile: string | null;
+  vacancyType: string | null;
+  replacedEmployeeName: string | null; replacedEmployeeCTC: string | null;
+  replacementFor: string | null; replacementReason: string | null;
+  isNewRole: boolean; isBusinessExpansion: boolean; newRoleJustification: string | null;
+  isBudgeted: boolean | null; proposedGrade: string | null;
+  minAge: number | null; maxAge: number | null;
+  minQualification: string | null; preferredQualification: string | null;
+  workExperience: string | null; industryBackground: string | null; otherSpecs: string | null;
+  contributionJustified: boolean;
   createdAt: string; approvedAt: string | null; rejectedAt: string | null; rejectionReason: string | null;
   country: { name: string }; division: { name: string } | null;
   branch: { name: string } | null; department: { name: string };
@@ -27,8 +38,8 @@ interface MRFDetail {
 }
 
 interface ApprovalRecord {
-  id: string; level: string; approverName: string; status: string;
-  notes: string | null; recordedAt: string;
+  id: string; level: string; approverName: string; approverDesignation: string | null;
+  status: string; notes: string | null; recordedAt: string;
 }
 
 interface CandidateSummary {
@@ -42,11 +53,15 @@ const APPROVAL_LEVELS = [
   { key: "COUNTRY_MANAGER", label: "Country Manager", pendingStatus: "PENDING_COUNTRY" },
 ];
 
-// Which MRF pending status each role can act on
 const ROLE_TO_PENDING: Record<string, string> = {
   DIVISIONAL_MANAGER: "PENDING_DIVISIONAL",
   FUNCTIONAL_HEAD: "PENDING_FUNCTIONAL",
   COUNTRY_MANAGER: "PENDING_COUNTRY",
+};
+
+const NEXT_LEVEL_LABEL: Record<string, string> = {
+  PENDING_FUNCTIONAL: "Functional Head",
+  PENDING_COUNTRY: "Country Manager",
 };
 
 export default function MRFDetailPage() {
@@ -55,14 +70,31 @@ export default function MRFDetailPage() {
   const role = (session?.user as { role?: string })?.role || "";
   const [mrf, setMrf] = useState<MRFDetail | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Approve/reject dialog
   const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | null>(null);
   const [approverName, setApproverName] = useState("");
+  const [approverDesignation, setApproverDesignation] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Send-to-next-approver modal (shown after successful approval when MRF still pending)
+  const [sendNextOpen, setSendNextOpen] = useState(false);
+  const [nextApproverEmail, setNextApproverEmail] = useState("");
+  const [nextApproverMessage, setNextApproverMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
+  const [postApprovalStatus, setPostApprovalStatus] = useState("");
+
+  // Restart approval dialog (for REJECTED MRFs)
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
+  const [restarting, setRestarting] = useState(false);
 
   const isAdminOrHR = ["ADMIN", "HR"].includes(role);
   const isManagerForThisLevel = mrf ? ROLE_TO_PENDING[role] === mrf.status : false;
   const canAct = (isAdminOrHR || isManagerForThisLevel) && mrf?.status?.startsWith("PENDING");
+  const isManagerSelfApproval = isManagerForThisLevel && !isAdminOrHR;
+  const canSubmitApproval = isManagerSelfApproval ? true : !!approverName;
 
   const fetchMRF = () => {
     fetch(`/api/mrfs/${id}`)
@@ -74,30 +106,71 @@ export default function MRFDetailPage() {
 
   const handleApproval = async () => {
     setSubmitting(true);
-    await fetch(`/api/mrfs/${id}/approve`, {
+    const res = await fetch(`/api/mrfs/${id}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: approvalDialog, approverName, notes }),
+      body: JSON.stringify({ action: approvalDialog, approverName, approverDesignation, notes }),
     });
     setSubmitting(false);
     setApprovalDialog(null);
-    setApproverName(""); setNotes("");
+    setApproverName(""); setApproverDesignation(""); setNotes("");
+
+    if (res.ok && approvalDialog === "approve") {
+      // Re-fetch to get new status, then decide whether to show send-next modal
+      const updated = await fetch(`/api/mrfs/${id}`).then((r) => r.json());
+      setMrf(updated);
+      const newStatus = updated.status;
+      // If still pending (not APPROVED/REJECTED), offer to send to next approver
+      if (newStatus && newStatus.startsWith("PENDING")) {
+        setPostApprovalStatus(newStatus);
+        setSendNextOpen(true);
+      }
+    } else {
+      fetchMRF();
+    }
+  };
+
+  const handleSendNext = async () => {
+    if (!nextApproverEmail) return;
+    setSending(true);
+    setSendError("");
+    const res = await fetch(`/api/mrfs/${id}/send-approval-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toEmail: nextApproverEmail, message: nextApproverMessage }),
+    });
+    setSending(false);
+    if (res.ok) {
+      setSendNextOpen(false);
+      setNextApproverEmail(""); setNextApproverMessage("");
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setSendError(data.error || "Failed to send email.");
+    }
+  };
+
+  const handleRestart = async () => {
+    setRestarting(true);
+    await fetch(`/api/mrfs/${id}/restart`, { method: "POST" });
+    setRestarting(false);
+    setRestartConfirmOpen(false);
     fetchMRF();
   };
 
-  // For manager self-approval, approverName is auto-filled from session
-  const isManagerSelfApproval = isManagerForThisLevel && !isAdminOrHR;
-  const canSubmitApproval = isManagerSelfApproval ? true : !!approverName;
+  const handlePrint = () => {
+    window.print();
+  };
 
   if (loading) return <div className="py-20 text-center text-gray-500"><Loader2 className="mx-auto h-8 w-8 animate-spin" /></div>;
   if (!mrf) return <div className="py-20 text-center text-gray-500">MRF not found.</div>;
 
   const statusInfo = MRF_STATUSES[mrf.status as keyof typeof MRF_STATUSES];
+  const nextLevelLabel = NEXT_LEVEL_LABEL[postApprovalStatus] || "Next Approver";
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-3 print:hidden">
         <Link href="/dashboard/mrfs">
           <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
         </Link>
@@ -110,32 +183,50 @@ export default function MRFDetailPage() {
           </div>
           <p className="text-sm text-gray-500 font-mono mt-1">{mrf.mrfNumber}</p>
         </div>
-        {canAct && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setApprovalDialog("reject")} className="text-red-600 border-red-200 hover:bg-red-50">
-              <XCircle className="h-4 w-4" /> Reject
+        <div className="flex gap-2 flex-wrap">
+          {mrf.status === "APPROVED" && (
+            <Button variant="outline" onClick={handlePrint} className="print:hidden">
+              <Printer className="h-4 w-4" /> Print / PDF
             </Button>
-            <Button onClick={() => setApprovalDialog("approve")}>
-              <CheckCircle className="h-4 w-4" />
-              {isManagerSelfApproval ? "Approve" : "Record Approval"}
-            </Button>
-          </div>
-        )}
+          )}
+          {mrf.status === "REJECTED" && isAdminOrHR && (
+            <>
+              <Link href={`/dashboard/mrfs/${id}/edit`}>
+                <Button variant="outline">
+                  <Pencil className="h-4 w-4" /> Edit
+                </Button>
+              </Link>
+              <Button variant="outline" onClick={() => setRestartConfirmOpen(true)} className="text-blue-600 border-blue-200 hover:bg-blue-50">
+                <RefreshCw className="h-4 w-4" /> Restart Approval
+              </Button>
+            </>
+          )}
+          {canAct && (
+            <>
+              <Button variant="outline" onClick={() => setApprovalDialog("reject")} className="text-red-600 border-red-200 hover:bg-red-50">
+                <XCircle className="h-4 w-4" /> Reject
+              </Button>
+              <Button onClick={() => setApprovalDialog("approve")}>
+                <CheckCircle className="h-4 w-4" />
+                {isManagerSelfApproval ? "Approve" : "Record Approval"}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Manager acting notice */}
-      {isManagerSelfApproval && mrf.status.startsWith("PENDING") && (
-        <div className="rounded-lg bg-orange-50 border border-orange-200 p-4">
-          <p className="text-sm font-medium text-orange-800">
-            This MRF is awaiting your approval as {role.replace(/_/g, " ")}.
-            Your approval will be recorded in your name automatically.
-          </p>
-        </div>
-      )}
+      {/* Print-only header */}
+      <div className="hidden print:block mb-6">
+        <h1 className="text-2xl font-bold">{mrf.title}</h1>
+        <p className="font-mono text-sm text-gray-600">{mrf.mrfNumber} · {statusInfo?.label || mrf.status}</p>
+      </div>
 
       {mrf.status === "REJECTED" && mrf.rejectionReason && (
         <div className="rounded-lg bg-red-50 border border-red-200 p-4">
           <p className="text-sm font-medium text-red-700">Rejected: {mrf.rejectionReason}</p>
+          {isAdminOrHR && (
+            <p className="text-xs text-red-600 mt-1">As Admin/HR you can edit this MRF and restart the approval process.</p>
+          )}
         </div>
       )}
 
@@ -150,8 +241,9 @@ export default function MRFDetailPage() {
               { label: "Branch / Office", value: mrf.branch?.name || "Country Level" },
               { label: "Department", value: mrf.department.name },
               { label: "Designation", value: mrf.designation?.title || "—" },
+              { label: "CTC Range", value: mrf.ctcRange || "—" },
               { label: "Vacancies", value: mrf.vacancyCount },
-              { label: "Created By", value: mrf.createdBy.name },
+              { label: "Raised By", value: mrf.fillerName ? `${mrf.fillerName}${mrf.fillerDesignation ? ` (${mrf.fillerDesignation})` : ""}` : mrf.createdBy.name },
               { label: "Created", value: formatDate(mrf.createdAt) },
               { label: "Approved", value: mrf.approvedAt ? formatDate(mrf.approvedAt) : "—" },
             ].map(({ label, value }) => (
@@ -178,7 +270,7 @@ export default function MRFDetailPage() {
         </Card>
 
         {/* Approval Timeline */}
-        <Card>
+        <Card className="print:hidden">
           <CardHeader><CardTitle>Approval Progress</CardTitle></CardHeader>
           <CardContent>
             <div className="space-y-4">
@@ -186,18 +278,14 @@ export default function MRFDetailPage() {
                 const record = mrf.approvalRecords.find((r) => r.level === level.key);
                 const currentPendingStatus = mrf.status;
                 const isCurrentLevel = currentPendingStatus === level.pendingStatus;
-                const isPastLevel = APPROVAL_LEVELS.findIndex((l) => l.pendingStatus === currentPendingStatus) > idx ||
-                  mrf.status === "APPROVED";
                 const isApproved = record?.status === "APPROVED";
                 const isRejected = record?.status === "REJECTED";
-                const isMyLevel = ROLE_TO_PENDING[role] === level.pendingStatus;
-
                 return (
                   <div key={level.key} className="flex items-start gap-3">
                     <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full
                       ${isApproved ? "bg-green-100 text-green-600" :
                         isRejected ? "bg-red-100 text-red-600" :
-                        isCurrentLevel ? (isMyLevel ? "bg-orange-100 text-orange-600" : "bg-blue-100 text-blue-600") :
+                        isCurrentLevel ? "bg-blue-100 text-blue-600" :
                         "bg-gray-100 text-gray-400"}`}>
                       {isApproved ? <CheckCircle className="h-4 w-4" /> :
                        isRejected ? <XCircle className="h-4 w-4" /> :
@@ -205,12 +293,7 @@ export default function MRFDetailPage() {
                        <span className="text-xs">{idx + 1}</span>}
                     </div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-gray-900">{level.label}</p>
-                        {isMyLevel && isCurrentLevel && (
-                          <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs text-orange-700 font-medium">Your turn</span>
-                        )}
-                      </div>
+                      <p className="text-sm font-medium text-gray-900">{level.label}</p>
                       {record ? (
                         <>
                           <p className="text-xs text-gray-500">
@@ -219,9 +302,7 @@ export default function MRFDetailPage() {
                           {record.notes && <p className="text-xs text-gray-600 mt-0.5 italic">"{record.notes}"</p>}
                         </>
                       ) : isCurrentLevel ? (
-                        <p className="text-xs text-blue-500">
-                          {isMyLevel ? "Awaiting your approval" : "Awaiting external approval"}
-                        </p>
+                        <p className="text-xs text-blue-500">Awaiting {level.label} approval</p>
                       ) : (
                         <p className="text-xs text-gray-400">Pending</p>
                       )}
@@ -235,13 +316,28 @@ export default function MRFDetailPage() {
                 );
               })}
             </div>
+
+            {/* Send to next approver button (if pending and admin/HR) */}
+            {mrf.status.startsWith("PENDING") && isAdminOrHR && (
+              <div className="mt-4 pt-4 border-t">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full text-blue-600 border-blue-200 hover:bg-blue-50"
+                  onClick={() => { setPostApprovalStatus(mrf.status); setSendNextOpen(true); }}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  Send Email to {NEXT_LEVEL_LABEL[mrf.status] || "Approver"}
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
 
       {/* Candidates Table */}
       {mrf.candidates.length > 0 && (
-        <Card>
+        <Card className="print:hidden">
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="flex items-center gap-2">
@@ -295,7 +391,7 @@ export default function MRFDetailPage() {
         </Card>
       )}
 
-      {/* Approval Dialog */}
+      {/* Approve/Reject Dialog */}
       <Dialog open={approvalDialog !== null} onOpenChange={() => setApprovalDialog(null)}>
         <DialogContent>
           <DialogHeader>
@@ -304,21 +400,22 @@ export default function MRFDetailPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            {isManagerSelfApproval ? (
-              <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-700">
-                Your approval will be recorded as <strong>{session?.user?.name}</strong>.
-              </div>
-            ) : (
+            {!isManagerSelfApproval && (
               <>
-                <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-700">
-                  Approvals happen externally (email / signed document). Use this form to record the external {approvalDialog === "approve" ? "approval" : "rejection"}.
-                </div>
                 <div className="space-y-2">
                   <Label>Approver Name *</Label>
                   <Input
                     placeholder="Name of person who approved/rejected"
                     value={approverName}
                     onChange={(e) => setApproverName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Approver Designation</Label>
+                  <Input
+                    placeholder="Job title / designation"
+                    value={approverDesignation}
+                    onChange={(e) => setApproverDesignation(e.target.value)}
                   />
                 </div>
               </>
@@ -342,6 +439,78 @@ export default function MRFDetailPage() {
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
               {approvalDialog === "approve" ? "Approve" : "Reject"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send to Next Approver Modal */}
+      <Dialog open={sendNextOpen} onOpenChange={(o) => { if (!o) setSendNextOpen(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="h-5 w-5 text-blue-600" />
+              Notify {nextLevelLabel}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800">
+              The MRF has been approved at this level and is now awaiting <strong>{nextLevelLabel}</strong> approval.
+              Send them an email with the direct MRF link.
+            </div>
+            <div className="space-y-2">
+              <Label>Approver Email *</Label>
+              <Input
+                type="email"
+                placeholder="next.approver@company.com"
+                value={nextApproverEmail}
+                onChange={(e) => setNextApproverEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Message (optional)</Label>
+              <Textarea
+                rows={3}
+                placeholder="Add a personal note..."
+                value={nextApproverMessage}
+                onChange={(e) => setNextApproverMessage(e.target.value)}
+              />
+            </div>
+            {sendError && <p className="text-sm text-red-600">{sendError}</p>}
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button variant="outline" onClick={() => setSendNextOpen(false)}>
+              Skip
+            </Button>
+            <Button onClick={handleSendNext} disabled={!nextApproverEmail || sending}>
+              {sending && <Loader2 className="h-4 w-4 animate-spin" />}
+              <Send className="h-4 w-4" />
+              Send Email
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Restart Approval Confirmation */}
+      <Dialog open={restartConfirmOpen} onOpenChange={setRestartConfirmOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Restart Approval Process?</DialogTitle>
+          </DialogHeader>
+          <div className="py-3 text-sm text-gray-600 space-y-2">
+            <p>This will:</p>
+            <ul className="list-disc list-inside space-y-1 text-gray-700">
+              <li>Clear all previous approval records for this MRF</li>
+              <li>Reset the status to <strong>Pending Divisional Approval</strong></li>
+            </ul>
+            <p>You can edit the MRF before restarting. This action cannot be undone.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestartConfirmOpen(false)}>Cancel</Button>
+            <Button onClick={handleRestart} disabled={restarting}>
+              {restarting && <Loader2 className="h-4 w-4 animate-spin" />}
+              <RefreshCw className="h-4 w-4" />
+              Restart
             </Button>
           </DialogFooter>
         </DialogContent>

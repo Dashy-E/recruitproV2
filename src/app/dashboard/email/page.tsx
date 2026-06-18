@@ -1,14 +1,21 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mail, Plus, Loader2 } from "lucide-react";
+import { Mail, Plus, Loader2, ClipboardList, Search } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+
+interface MRFOption {
+  id: string;
+  mrfNumber: string;
+  title: string;
+  status: string;
+}
 
 interface EmailRecord {
   id: string;
@@ -16,15 +23,8 @@ interface EmailRecord {
   subject: string;
   body: string;
   sentAt: string;
-  candidateId: string | null;
-  candidate: { firstName: string; lastName: string } | null;
-}
-
-interface Candidate {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
+  mrfId: string | null;
+  mrf: { id: string; mrfNumber: string; title: string } | null;
 }
 
 export default function EmailPage() {
@@ -32,8 +32,9 @@ export default function EmailPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<EmailRecord | null>(null);
   const [showCompose, setShowCompose] = useState(false);
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [form, setForm] = useState({ toEmail: "", subject: "", body: "", candidateId: "" });
+  const [mrfs, setMrfs] = useState<MRFOption[]>([]);
+  const [mrfSearch, setMrfSearch] = useState("");
+  const [form, setForm] = useState({ toEmail: "", subject: "", body: "", mrfId: "" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -45,9 +46,16 @@ export default function EmailPage() {
 
   useEffect(() => {
     fetchEmails();
-    fetch("/api/candidates")
+    // Fetch pending-approval MRFs only
+    fetch("/api/mrfs")
       .then((r) => r.json())
-      .then((d) => setCandidates(Array.isArray(d) ? d : []));
+      .then((d) => {
+        if (Array.isArray(d)) {
+          setMrfs(d.filter((m: MRFOption) =>
+            ["PENDING_DIVISIONAL", "PENDING_FUNCTIONAL", "PENDING_COUNTRY"].includes(m.status)
+          ));
+        }
+      });
   }, []);
 
   const handleCompose = async () => {
@@ -61,14 +69,17 @@ export default function EmailPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ...form,
-        candidateId: form.candidateId && form.candidateId !== "__none" ? form.candidateId : null,
+        toEmail: form.toEmail,
+        subject: form.subject,
+        body: form.body,
+        mrfId: form.mrfId && form.mrfId !== "__none" ? form.mrfId : null,
       }),
     });
     setSubmitting(false);
     if (res.ok) {
       setShowCompose(false);
-      setForm({ toEmail: "", subject: "", body: "", candidateId: "" });
+      setForm({ toEmail: "", subject: "", body: "", mrfId: "" });
+      setMrfSearch("");
       fetchEmails();
     } else {
       const data = await res.json();
@@ -77,18 +88,34 @@ export default function EmailPage() {
   };
 
   const openCompose = () => {
-    setForm({ toEmail: "", subject: "", body: "", candidateId: "" });
+    setForm({ toEmail: "", subject: "", body: "", mrfId: "" });
+    setMrfSearch("");
     setError("");
     setShowCompose(true);
   };
 
-  const selectCandidate = (id: string) => {
-    const c = candidates.find((c) => c.id === id);
+  const selectMrf = (mrf: MRFOption) => {
     setForm((prev) => ({
       ...prev,
-      candidateId: id,
-      toEmail: c ? c.email : prev.toEmail,
+      mrfId: mrf.id,
+      subject: prev.subject || `Re: MRF ${mrf.mrfNumber} — ${mrf.title}`,
     }));
+    setMrfSearch(`${mrf.mrfNumber} — ${mrf.title}`);
+  };
+
+  const filteredMrfs = mrfSearch.length > 0
+    ? mrfs.filter((m) =>
+        m.mrfNumber.toLowerCase().includes(mrfSearch.toLowerCase()) ||
+        m.title.toLowerCase().includes(mrfSearch.toLowerCase())
+      )
+    : mrfs;
+
+  const [showMrfDropdown, setShowMrfDropdown] = useState(false);
+
+  const STATUS_LABELS: Record<string, string> = {
+    PENDING_DIVISIONAL: "Pending Divisional",
+    PENDING_FUNCTIONAL: "Pending Functional",
+    PENDING_COUNTRY: "Pending Country",
   };
 
   return (
@@ -126,8 +153,8 @@ export default function EmailPage() {
                     >
                       <p className="text-sm font-medium text-gray-900 truncate">{email.subject}</p>
                       <p className="text-xs text-gray-500 truncate">To: {email.toEmail}</p>
-                      {email.candidate && (
-                        <p className="text-xs text-blue-500">{email.candidate.firstName} {email.candidate.lastName}</p>
+                      {email.mrf && (
+                        <p className="text-xs text-blue-500 truncate">MRF: {email.mrf.mrfNumber}</p>
                       )}
                       <p className="text-xs text-gray-400 mt-0.5">{formatDate(email.sentAt)}</p>
                     </li>
@@ -148,8 +175,16 @@ export default function EmailPage() {
                     <CardTitle>{selected.subject}</CardTitle>
                     <p className="text-sm text-gray-500">To: {selected.toEmail}</p>
                     <p className="text-xs text-gray-400">{formatDate(selected.sentAt)}</p>
-                    {selected.candidate && (
-                      <p className="text-xs text-blue-600">Linked candidate: {selected.candidate.firstName} {selected.candidate.lastName}</p>
+                    {selected.mrf && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <ClipboardList className="h-3.5 w-3.5 text-blue-500" />
+                        <Link
+                          href={`/dashboard/mrfs/${selected.mrf.id}`}
+                          className="text-xs text-blue-600 hover:underline font-medium"
+                        >
+                          {selected.mrf.mrfNumber} — {selected.mrf.title}
+                        </Link>
+                      </div>
                     )}
                   </div>
                 </CardHeader>
@@ -174,18 +209,57 @@ export default function EmailPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Compose Email</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
+            {/* MRF Selector */}
             <div className="space-y-2">
-              <Label>Link to Candidate (optional)</Label>
-              <Select value={form.candidateId} onValueChange={selectCandidate}>
-                <SelectTrigger><SelectValue placeholder="Select candidate (optional)" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">— None —</SelectItem>
-                  {candidates.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.firstName} {c.lastName} — {c.email}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Link MRF (optional — pending approval only)</Label>
+              <div className="relative">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                  <Input
+                    className="pl-8 text-sm"
+                    placeholder="Search by MRF number or title…"
+                    value={mrfSearch}
+                    autoComplete="off"
+                    onChange={(e) => {
+                      setMrfSearch(e.target.value);
+                      if (!e.target.value) setForm((p) => ({ ...p, mrfId: "" }));
+                      setShowMrfDropdown(true);
+                    }}
+                    onFocus={() => setShowMrfDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowMrfDropdown(false), 150)}
+                  />
+                </div>
+                {showMrfDropdown && filteredMrfs.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                    <button
+                      type="button"
+                      className="w-full px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-50"
+                      onMouseDown={() => { setForm((p) => ({ ...p, mrfId: "" })); setMrfSearch(""); setShowMrfDropdown(false); }}
+                    >
+                      — No MRF —
+                    </button>
+                    {filteredMrfs.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className={`w-full px-3 py-2 text-left hover:bg-blue-50 transition-colors ${form.mrfId === m.id ? "bg-blue-50" : ""}`}
+                        onMouseDown={() => { selectMrf(m); setShowMrfDropdown(false); }}
+                      >
+                        <p className="text-sm font-medium text-gray-900">{m.mrfNumber} — {m.title}</p>
+                        <p className="text-xs text-yellow-600">{STATUS_LABELS[m.status] || m.status}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {form.mrfId && (
+                <p className="text-xs text-blue-600 flex items-center gap-1">
+                  <ClipboardList className="h-3 w-3" />
+                  MRF linked — receiver can open MRF page directly from email.
+                </p>
+              )}
             </div>
+
             <div className="space-y-2">
               <Label>To *</Label>
               <Input

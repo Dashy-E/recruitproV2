@@ -1735,4 +1735,173 @@ After calling `POST /api/seed` → `POST /api/seed/extend-org` → `POST /api/se
 
 ---
 
+## 19. Session Changes (2026-06-17)
+
+### 19.1 MRF Mandatory Fields & Filler Tracking
+
+**New mandatory fields on MRF creation:**
+- `ctcRange` — CTC Range is now required (API returns 400 if missing).
+- `fillerName` — Full name of the person raising the MRF.
+- `fillerDesignation` — Designation of the person raising the MRF.
+
+**New schema fields (MRF model):**
+```
+fillerName        String?
+fillerDesignation String?
+```
+
+**UI changes (`src/app/dashboard/mrfs/new/page.tsx`):**
+- CTC Range label changed to "CTC Range *".
+- New "Raised By" card added with Full Name * and Designation * inputs.
+- Submit button disabled until all three fields are filled.
+
+**MRF Detail (`src/app/dashboard/mrfs/[id]/page.tsx`):**
+- CTC Range and "Raised By" shown in the info grid on MRF detail.
+- Approval dialog includes `approverDesignation` input (for ADMIN/HR recording external approvals).
+- Approval timeline shows notes/remarks for each record.
+
+**Approval record schema change (`MRFApprovalRecord` model):**
+```
+approverDesignation  String?
+```
+
+**API change (`src/app/api/mrfs/[id]/approve/route.ts`):**
+- Accepts `approverDesignation` in body.
+- Stores it in every `INSERT INTO MRFApprovalRecord` call via `prisma.$queryRawUnsafe`.
+
+---
+
+### 19.2 Corporate Branch Cleanup
+
+- Removed "Delhi HO" branch (id `cmq0lkwxf000jwopc6auk7aqc`, code `DEL-HO`) from the database.
+- Deletion was safe — no Users or MRFs referenced this branch.
+- Corporate branches are under India's "Corporate" Division (id `cb70c9i4xhnyku72mzr7mu3y9`), NOT under a separate Corporate country entity.
+
+---
+
+### 19.3 Employee Type System (India / Overseas)
+
+**New schema field (`Employee` model):**
+```
+employeeType  String  @default("INDIA")   // "INDIA" or "OVERSEAS"
+```
+
+**API change (`src/app/api/employees/[id]/route.ts`):**
+- EMPLOYEE role PATCH now accepts both `onboardingStep` (Int) and `employeeType` ("INDIA" | "OVERSEAS").
+
+**Employee Portal UI (`src/app/dashboard/employee-portal/page.tsx`):**
+- Step 0 now starts with an Employee Category selection (India Employee / Overseas Employee) before document upload.
+- After selecting type, it is persisted via PATCH and a mandatory document checklist is shown.
+- **India checklist:** Aadhaar Card, PAN Card, Qualification Documents, Bank Details (all required).
+- **Overseas checklist:** Passport/Government-Issued ID, Qualification Documents, Bank Details (all required).
+- Each checklist item has an Upload button; uploaded docs are tagged with a `documentType` key (e.g. `AADHAAR`, `PAN`, `PASSPORT`, `BANK_DETAILS`, `QUALIFICATION`).
+- Design is configurable: checklists are plain constants (`INDIA_CHECKLIST`, `OVERSEAS_CHECKLIST`) that can be extended without code changes to the upload logic.
+
+---
+
+### 19.4 Document Text Extraction (PDF Parsing)
+
+**New package:** `pdf-parse` (installed via npm).
+
+**New file (`src/lib/extract-document.ts`):**
+- `extractDocumentData(filePath, mimeType, documentType)` — reads a PDF file and extracts key fields using regex patterns.
+- Returns `Record<string, string> | null` (null for non-PDFs or unrecognised types).
+- Supported document types and extracted fields:
+  - `AADHAAR`: aadhaarNumber, name, dob
+  - `PAN`: panNumber, name
+  - `PASSPORT`: passportNumber, name, nationality, dob, expiryDate
+  - `BANK_DETAILS`: accountNumber, ifsc, bankName
+- Uses dynamic import (`const pdfParse = (await import("pdf-parse")).default`) to avoid Edge runtime issues.
+
+**New schema field (`Document` model):**
+```
+extractedData  String?   // JSON string of extracted fields, or null
+```
+
+**Document upload API (`src/app/api/documents/route.ts`):**
+- After saving the file, calls `extractDocumentData()` for extractable types.
+- Stores result as JSON in `extractedData` field.
+- Uses `prisma.$queryRawUnsafe()` for INSERT to include the new `extractedData` column (Prisma client cache is stale — does not know about this field without regeneration).
+- Original file is never overwritten; extraction is additive.
+
+---
+
+### 19.5 HR Form Templates (Document Templates)
+
+**New Prisma model (`DocumentTemplate`):**
+```prisma
+model DocumentTemplate {
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  templateType String
+  fileUrl      String
+  fileSize     Int
+  isActive     Boolean  @default(true)
+  uploadedById String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  uploadedBy   User     @relation("TemplateUploadedBy", fields: [uploadedById], references: [id])
+}
+```
+
+**Template types:** `JOINING_FORM`, `DECLARATION_MSK`, `TIC_COUNSEL`, `OTHER`.
+
+**New API routes:**
+- `GET /api/document-templates` — Returns all active templates with uploader name (JOIN with User). No auth required (employees need to read this).
+- `POST /api/document-templates` — Auth: ADMIN/HR. Accepts multipart form (file, name, templateType, description). Saves file to `public/uploads/templates/`. Inserts via `prisma.$queryRawUnsafe`.
+- `DELETE /api/document-templates/[id]` — Auth: ADMIN/HR. Deletes physical file (best-effort) then DB record.
+- `PATCH /api/document-templates/[id]` — Auth: ADMIN/HR. Updates name/description.
+
+**New HR management page (`src/app/dashboard/document-templates/page.tsx`):**
+- Card grid of templates with Download + Delete buttons.
+- "Add Template" dialog: name, type dropdown, description, file upload.
+- Visible to ADMIN and HR roles.
+- Added to sidebar as "Form Templates" nav item.
+
+**Employee Portal integration:**
+- Below the document checklist, employees see a "HR Form Templates" section.
+- Each template has a Download button (opens `fileUrl` in new tab).
+- Employees download the blank template, fill it, and upload the completed version via the document checklist.
+
+---
+
+### 19.6 Candidate Email Autocomplete
+
+**File changed:** `src/app/dashboard/candidates/page.tsx`
+
+- On mount, fetches `/api/users` and stores the user list.
+- In the Add Candidate dialog, the Email field now shows an autocomplete dropdown as the user types.
+- Suggestions are filtered from the users list (`u.email.toLowerCase().includes(typed)`) — up to 6 results shown.
+- Clicking a suggestion auto-fills: `email`, `firstName` (first word of user.name), `lastName` (remaining words).
+- Dropdown dismisses on blur (with 150ms delay to allow click) or on selection.
+- `autoComplete="off"` on the input to prevent browser native autocomplete conflicting.
+
+---
+
+### 19.7 Migration
+
+Migration applied: `20260617054956_add_doc_templates_mrf_filler_employee_type`
+
+Adds:
+- `MRF.fillerName` (TEXT, nullable)
+- `MRF.fillerDesignation` (TEXT, nullable)
+- `MRFApprovalRecord.approverDesignation` (TEXT, nullable)
+- `Document.extractedData` (TEXT, nullable)
+- `Employee.employeeType` (TEXT, default "INDIA")
+- `DocumentTemplate` table (full schema above)
+
+---
+
+### 19.8 Universal Manager (COUNTRY_MANAGER) Dashboard
+
+**File changed:** `src/app/dashboard/page.tsx`
+
+- "Total Candidates" stat card is hidden for COUNTRY_MANAGER role.
+- "Candidates by Stage" chart is hidden for COUNTRY_MANAGER role.
+- Dashboard grid adjusts to 3-column (instead of 4) for COUNTRY_MANAGER.
+- "Recent MRFs" card spans 2 columns for COUNTRY_MANAGER to fill the space.
+
+---
+
 *End of PROJECT_CONTEXT.md*

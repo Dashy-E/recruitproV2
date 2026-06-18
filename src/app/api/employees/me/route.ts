@@ -31,7 +31,7 @@ export async function GET() {
 
   const documents = await prisma.document.findMany({
     where: { candidateId: candidate.id },
-    select: { id: true, name: true, fileUrl: true, fileType: true, createdAt: true },
+    select: { id: true, name: true, fileUrl: true, fileType: true, fileSize: true, documentType: true, approvalStatus: true, extractedData: true, createdAt: true },
     orderBy: { createdAt: "desc" },
   });
 

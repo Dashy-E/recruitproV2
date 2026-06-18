@@ -46,7 +46,7 @@ export default function MRFsPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const canCreate = ["ADMIN", "HR", "BRANCH_MANAGER"].includes(role);
+  const canCreate = ["ADMIN", "HR", "BRANCH_MANAGER", "COUNTRY_MANAGER"].includes(role);
   const myPendingStatus = MANAGER_PENDING[role];
   const pendingForMe = myPendingStatus ? mrfs.filter((m) => m.status === myPendingStatus) : [];
 

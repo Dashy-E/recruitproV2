@@ -166,9 +166,11 @@ export default async function DashboardPage() {
     );
   }
 
+  const isUniversalManager = role === "COUNTRY_MANAGER";
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${isUniversalManager ? "lg:grid-cols-3" : "lg:grid-cols-4"}`}>
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-4">
@@ -211,49 +213,53 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-4">
-              <div className="rounded-lg bg-purple-100 p-3">
-                <Users className="h-6 w-6 text-purple-600" />
+        {!isUniversalManager && (
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-4">
+                <div className="rounded-lg bg-purple-100 p-3">
+                  <Users className="h-6 w-6 text-purple-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Total Candidates</p>
+                  <p className="text-2xl font-bold text-gray-900">{candidateCount}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm text-gray-500">Total Candidates</p>
-                <p className="text-2xl font-bold text-gray-900">{candidateCount}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-blue-600" />
-              Candidates by Stage
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {CANDIDATE_STAGES.map((stage) => {
-                const count = stageMap[stage.key] || 0;
-                const pct = candidateCount > 0 ? Math.round((count / candidateCount) * 100) : 0;
-                return (
-                  <div key={stage.key} className="flex items-center gap-3">
-                    <span className="w-44 text-sm text-gray-600 truncate">{stage.label}</span>
-                    <div className="flex-1 rounded-full bg-gray-100 h-2">
-                      <div className="rounded-full bg-blue-500 h-2 transition-all" style={{ width: `${pct}%` }} />
+        {!isUniversalManager && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-blue-600" />
+                Candidates by Stage
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {CANDIDATE_STAGES.map((stage) => {
+                  const count = stageMap[stage.key] || 0;
+                  const pct = candidateCount > 0 ? Math.round((count / candidateCount) * 100) : 0;
+                  return (
+                    <div key={stage.key} className="flex items-center gap-3">
+                      <span className="w-44 text-sm text-gray-600 truncate">{stage.label}</span>
+                      <div className="flex-1 rounded-full bg-gray-100 h-2">
+                        <div className="rounded-full bg-blue-500 h-2 transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="w-8 text-right text-sm font-medium text-gray-700">{count}</span>
                     </div>
-                    <span className="w-8 text-right text-sm font-medium text-gray-700">{count}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-        <Card>
+        <Card className={isUniversalManager ? "lg:col-span-2" : ""}>
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="flex items-center gap-2">

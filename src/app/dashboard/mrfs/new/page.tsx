@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ArrowLeft, Loader2, Send } from "lucide-react";
 import Link from "next/link";
 
 interface Country { id: string; name: string; locationType: string }
@@ -67,8 +68,21 @@ export default function NewMRFPage() {
   // Section 5 – Certification
   const [contributionJustified, setContributionJustified] = useState(false);
 
+  // Section 6 – Filler details (mandatory)
+  const [fillerName, setFillerName] = useState("");
+  const [fillerDesignation, setFillerDesignation] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Send-for-approval modal (shown after MRF is created)
+  const [createdMrfId, setCreatedMrfId] = useState<string | null>(null);
+  const [createdMrfNumber, setCreatedMrfNumber] = useState("");
+  const [sendModalOpen, setSendModalOpen] = useState(false);
+  const [approverEmail, setApproverEmail] = useState("");
+  const [approverMessage, setApproverMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
 
   const countryObj = countries.find((c) => c.id === selectedCountry);
   const isIndia = countryObj?.locationType === "INDIA";
@@ -108,6 +122,8 @@ export default function NewMRFPage() {
     if (!title || !selectedCountry || !selectedDepartment) return false;
     if (isIndia && (!selectedDivision || !selectedBranch)) return false;
     if (!vacancyType) return false;
+    if (!ctcRange.trim()) return false;
+    if (!fillerName.trim() || !fillerDesignation.trim()) return false;
     return true;
   };
 
@@ -156,6 +172,9 @@ export default function NewMRFPage() {
       otherSpecs: otherSpecs || null,
       // Certification
       contributionJustified,
+      // Filler details
+      fillerName,
+      fillerDesignation,
     };
 
     const res = await fetch("/api/mrfs", {
@@ -168,10 +187,30 @@ export default function NewMRFPage() {
 
     if (res.ok) {
       const mrf = await res.json();
-      router.push(`/dashboard/mrfs/${mrf.id}`);
+      setCreatedMrfId(mrf.id);
+      setCreatedMrfNumber(mrf.mrfNumber || "");
+      setSendModalOpen(true);
     } else {
       const data = await res.json();
       setError(data.error || "Failed to create MRF.");
+    }
+  };
+
+  const handleSendApprovalEmail = async () => {
+    if (!createdMrfId || !approverEmail) return;
+    setSending(true);
+    setSendError("");
+    const res = await fetch(`/api/mrfs/${createdMrfId}/send-approval-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toEmail: approverEmail, message: approverMessage }),
+    });
+    setSending(false);
+    if (res.ok) {
+      router.push(`/dashboard/mrfs/${createdMrfId}`);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setSendError(data.error || "Failed to send email.");
     }
   };
 
@@ -424,7 +463,7 @@ export default function NewMRFPage() {
                 <Input value={proposedGrade} onChange={(e) => setProposedGrade(e.target.value)} placeholder="e.g. M3" />
               </div>
               <div className="space-y-2">
-                <Label>CTC Range</Label>
+                <Label>CTC Range *</Label>
                 <Input value={ctcRange} onChange={(e) => setCtcRange(e.target.value)} placeholder="e.g. ₹5–7 LPA" />
               </div>
             </div>
@@ -501,6 +540,8 @@ export default function NewMRFPage() {
           </CardContent>
         </Card>
 
+        {/* Section 3 – CTC Range (now mandatory, inline reminder) */}
+
         {/* Section 5 – Certification */}
         <Card>
           <CardHeader><CardTitle>Section 5 – Certification</CardTitle></CardHeader>
@@ -519,6 +560,32 @@ export default function NewMRFPage() {
           </CardContent>
         </Card>
 
+        {/* Section 6 – Raised By */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Raised By</CardTitle>
+            <p className="text-sm text-gray-500">Details of the person raising this MRF</p>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Full Name *</Label>
+              <Input
+                placeholder="Name of person submitting this MRF"
+                value={fillerName}
+                onChange={(e) => setFillerName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Designation *</Label>
+              <Input
+                placeholder="Your designation / job title"
+                value={fillerDesignation}
+                onChange={(e) => setFillerDesignation(e.target.value)}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
         {error && (
           <div className="rounded-md bg-red-50 p-4 text-sm text-red-600">{error}</div>
         )}
@@ -533,6 +600,59 @@ export default function NewMRFPage() {
           </Button>
         </div>
       </form>
+
+      {/* Send for Approval Modal */}
+      <Dialog open={sendModalOpen} onOpenChange={() => {}}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="h-5 w-5 text-blue-600" />
+              Send MRF for Approval
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="rounded-md bg-green-50 border border-green-200 p-3 text-sm text-green-800">
+              MRF <span className="font-mono font-semibold">{createdMrfNumber}</span> has been created successfully.
+              Send it to the first approver now.
+            </div>
+            <div className="space-y-2">
+              <Label>Approver Email *</Label>
+              <Input
+                type="email"
+                placeholder="divisional.manager@company.com"
+                value={approverEmail}
+                onChange={(e) => setApproverEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Message (optional)</Label>
+              <Textarea
+                rows={3}
+                placeholder="Add a personal note to the approver..."
+                value={approverMessage}
+                onChange={(e) => setApproverMessage(e.target.value)}
+              />
+            </div>
+            {sendError && <p className="text-sm text-red-600">{sendError}</p>}
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={() => router.push(`/dashboard/mrfs/${createdMrfId}`)}
+            >
+              Skip, view MRF
+            </Button>
+            <Button
+              onClick={handleSendApprovalEmail}
+              disabled={!approverEmail || sending}
+            >
+              {sending && <Loader2 className="h-4 w-4 animate-spin" />}
+              <Send className="h-4 w-4" />
+              Send Email
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

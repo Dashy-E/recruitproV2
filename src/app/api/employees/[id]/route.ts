@@ -11,18 +11,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const role = (session.user as { role?: string })?.role;
   const userId = (session.user as { id?: string })?.id;
 
-  // Employees can only advance their own onboardingStep
+  // Employees can update their own onboardingStep or employeeType
   if (role === "EMPLOYEE") {
     const candidate = await prisma.candidate.findFirst({ where: { userId } });
     const employee = candidate ? await prisma.employee.findUnique({ where: { candidateId: candidate.id } }) : null;
     if (!employee || employee.id !== id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const { onboardingStep } = await req.json();
-    if (typeof onboardingStep !== "number") {
-      return NextResponse.json({ error: "onboardingStep must be a number" }, { status: 400 });
+    const body = await req.json();
+    const allowedFields: Record<string, unknown> = {};
+    if (typeof body.onboardingStep === "number") allowedFields.onboardingStep = body.onboardingStep;
+    if (body.employeeType === "INDIA" || body.employeeType === "OVERSEAS") {
+      allowedFields.employeeType = body.employeeType;
     }
-    const updated = await prisma.employee.update({ where: { id }, data: { onboardingStep } });
+    if (Object.keys(allowedFields).length === 0) {
+      return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+    }
+    const updated = await prisma.employee.update({ where: { id }, data: allowedFields });
     return NextResponse.json(updated);
   }
 

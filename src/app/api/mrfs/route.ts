@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   const role = (session.user as { role?: string })?.role;
   const userId = (session.user as { id?: string })?.id;
-  if (!["ADMIN", "HR", "BRANCH_MANAGER"].includes(role || "")) {
+  if (!["ADMIN", "HR", "BRANCH_MANAGER", "COUNTRY_MANAGER"].includes(role || "")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -62,6 +62,12 @@ export async function POST(req: NextRequest) {
 
   if (!title || !countryId || !departmentId) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+  }
+  if (!body.ctcRange?.trim()) {
+    return NextResponse.json({ error: "CTC Range is required" }, { status: 400 });
+  }
+  if (!body.fillerName?.trim() || !body.fillerDesignation?.trim()) {
+    return NextResponse.json({ error: "Name and designation of person raising MRF are required" }, { status: 400 });
   }
 
   const mrf = await prisma.mRF.create({
@@ -101,6 +107,8 @@ export async function POST(req: NextRequest) {
       industryBackground: body.industryBackground || null,
       otherSpecs: body.otherSpecs || null,
       contributionJustified: body.contributionJustified || false,
+      fillerName: body.fillerName || null,
+      fillerDesignation: body.fillerDesignation || null,
     },
     include: {
       country: true,

@@ -207,6 +207,8 @@ function CandidatesContent() {
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", mrfId: mrfFilter });
   const [submitting, setSubmitting] = useState(false);
   const [newCandidatePassword, setNewCandidatePassword] = useState("");
+  const [users, setUsers] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [showEmailSuggestions, setShowEmailSuggestions] = useState(false);
 
   const fetchCandidates = () => {
     const url = mrfFilter ? `/api/candidates?mrfId=${mrfFilter}` : "/api/candidates";
@@ -216,6 +218,7 @@ function CandidatesContent() {
   useEffect(() => {
     fetchCandidates();
     fetch("/api/mrfs").then((r) => r.json()).then(setMrfs);
+    fetch("/api/users").then((r) => r.json()).then((d) => setUsers(Array.isArray(d) ? d : []));
   }, []);
 
   // Separate active/rejected/on-hold
@@ -253,6 +256,10 @@ function CandidatesContent() {
   };
 
   const stageCount = (key: string) => activeCandidates.filter((c) => c.currentStage === key).length;
+
+  const emailSuggestions = form.email.trim().length > 0
+    ? users.filter((u) => u.email.toLowerCase().includes(form.email.toLowerCase())).slice(0, 6)
+    : [];
 
   const INTERVIEW_STAGES = new Set(["INTERVIEW_1", "INTERVIEW_2", "INTERVIEW_3"]);
   const interviewedFiltered = filtered.filter((c) => INTERVIEW_STAGES.has(c.currentStage));
@@ -434,7 +441,39 @@ function CandidatesContent() {
             </div>
             <div className="space-y-2">
               <Label>Email *</Label>
-              <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              <div className="relative">
+                <Input
+                  type="email"
+                  value={form.email}
+                  autoComplete="off"
+                  onChange={(e) => { setForm({ ...form, email: e.target.value }); setShowEmailSuggestions(true); }}
+                  onFocus={() => setShowEmailSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowEmailSuggestions(false), 150)}
+                />
+                {showEmailSuggestions && emailSuggestions.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                    {emailSuggestions.map((u) => {
+                      const parts = u.name.trim().split(" ");
+                      const firstName = parts[0] || "";
+                      const lastName = parts.slice(1).join(" ");
+                      return (
+                        <button
+                          key={u.id}
+                          type="button"
+                          className="w-full px-3 py-2 text-left hover:bg-blue-50 transition-colors"
+                          onMouseDown={() => {
+                            setForm({ ...form, email: u.email, firstName: firstName || form.firstName, lastName: lastName || form.lastName });
+                            setShowEmailSuggestions(false);
+                          }}
+                        >
+                          <p className="text-sm font-medium text-gray-900">{u.name}</p>
+                          <p className="text-xs text-gray-500">{u.email}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Phone</Label>

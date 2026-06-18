@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FolderOpen, FileText, CheckCircle, XCircle, Clock, Loader2, User, ChevronDown, ChevronRight } from "lucide-react";
+import { FolderOpen, FileText, CheckCircle, XCircle, Clock, Loader2, User, ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
 interface Document {
@@ -16,9 +16,10 @@ interface Document {
   documentType: string;
   approvalStatus: string;
   approvalNotes: string | null;
+  extractedData: string | null;
   createdAt: string;
   uploadedBy: { name: string };
-  candidate: { id: string; firstName: string; lastName: string } | null;
+  candidate: { id: string; firstName: string; lastName: string; employee: { id: string } | null } | null;
   mrf: { mrfNumber: string; title: string } | null;
 }
 
@@ -55,6 +56,7 @@ export default function DocumentsPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [applyResult, setApplyResult] = useState<Record<string, { ok: boolean; msg: string }>>({});
   const [filter, setFilter] = useState<"ALL" | "PENDING" | "APPROVED" | "REJECTED">("ALL");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -65,6 +67,19 @@ export default function DocumentsPage() {
   };
 
   useEffect(() => { fetchDocs(); }, []);
+
+  const handleApplyToProfile = async (docId: string) => {
+    setActionLoading(docId + "APPLY");
+    const res = await fetch(`/api/documents/${docId}/apply-to-profile`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    setApplyResult((prev) => ({
+      ...prev,
+      [docId]: res.ok
+        ? { ok: true, msg: `Applied ${data.appliedFields?.length || 0} field(s) to employee profile` }
+        : { ok: false, msg: data.error || "Failed to apply" },
+    }));
+    setActionLoading(null);
+  };
 
   const handleApproval = async (id: string, approvalStatus: string) => {
     setActionLoading(id + approvalStatus);
@@ -220,6 +235,41 @@ export default function DocumentsPage() {
                               {doc.approvalNotes && (
                                 <p className="text-xs text-gray-500 italic mt-0.5">"{doc.approvalNotes}"</p>
                               )}
+                              {doc.extractedData && (() => {
+                                try {
+                                  const fields = JSON.parse(doc.extractedData);
+                                  const entries = Object.entries(fields);
+                                  if (!entries.length) return null;
+                                  const result = applyResult[doc.id];
+                                  const canApply = !!doc.candidate?.employee;
+                                  return (
+                                    <div className="mt-1.5 bg-blue-50 rounded px-2 py-1.5 text-xs text-gray-600 space-y-0.5">
+                                      <div className="flex items-center justify-between mb-1">
+                                        <p className="font-semibold text-blue-700 flex items-center gap-1">
+                                          <Sparkles className="h-3 w-3" /> Extracted Data
+                                        </p>
+                                        {canApply && (
+                                          <Button
+                                            size="sm" variant="ghost"
+                                            className="h-6 text-xs text-blue-700 hover:bg-blue-100 px-2"
+                                            disabled={actionLoading === doc.id + "APPLY"}
+                                            onClick={() => handleApplyToProfile(doc.id)}
+                                          >
+                                            {actionLoading === doc.id + "APPLY" ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                                            Apply to Profile
+                                          </Button>
+                                        )}
+                                      </div>
+                                      {result && (
+                                        <p className={`text-xs mb-1 font-medium ${result.ok ? "text-green-700" : "text-red-600"}`}>{result.msg}</p>
+                                      )}
+                                      {entries.map(([k, v]) => (
+                                        <p key={k}><span className="text-gray-500 capitalize">{k.replace(/([A-Z])/g, " $1").trim()}:</span> <span className="font-medium">{String(v)}</span></p>
+                                      ))}
+                                    </div>
+                                  );
+                                } catch { return null; }
+                              })()}
                             </div>
 
                             {/* Status badge */}

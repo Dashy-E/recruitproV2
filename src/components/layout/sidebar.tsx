@@ -42,9 +42,19 @@ const navItems: NavItem[] = [
     roles: ["ADMIN", "HR"],
   },
   {
-    label: "Documents",
+    label: "Document Center",
     href: "/dashboard/documents",
     icon: FolderOpen,
+    roles: ["ADMIN", "HR"],
+    children: [
+      { label: "All Documents", href: "/dashboard/documents" },
+      { label: "Candidate Docs", href: "/dashboard/candidates" },
+    ],
+  },
+  {
+    label: "Form Templates",
+    href: "/dashboard/document-templates",
+    icon: FileText,
     roles: ["ADMIN", "HR"],
   },
   {

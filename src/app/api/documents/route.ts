@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
+import { extractDocumentData } from "@/lib/extract-document";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
     where,
     include: {
       uploadedBy: { select: { name: true } },
-      candidate: { select: { firstName: true, lastName: true } },
+      candidate: { select: { id: true, firstName: true, lastName: true, employee: { select: { id: true } } } },
       mrf: { select: { mrfNumber: true, title: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -85,7 +86,8 @@ export async function POST(req: NextRequest) {
   await mkdir(uploadDir, { recursive: true });
 
   const safeFileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-  await writeFile(join(uploadDir, safeFileName), buffer);
+  const filePath = join(uploadDir, safeFileName);
+  await writeFile(filePath, buffer);
   const fileUrl = `/uploads/${safeFileName}`;
 
   // Candidate uploads start as PENDING (need approval); HR/Admin uploads auto-approved
@@ -98,19 +100,23 @@ export async function POST(req: NextRequest) {
     resolvedCandidateId = candidate?.id ?? null;
   }
 
-  const doc = await prisma.document.create({
-    data: {
-      name: file.name,
-      fileUrl,
-      fileType: file.type || "application/octet-stream",
-      fileSize: file.size,
-      documentType,
-      uploadedById: userId,
-      candidateId: resolvedCandidateId || null,
-      mrfId: mrfId || null,
-      approvalStatus,
-    },
-  });
+  // Attempt to extract text data from PDFs for known document types
+  const extractableTypes = ["AADHAAR", "PAN", "PASSPORT", "BANK_DETAILS"];
+  let extractedData: string | null = null;
+  if (extractableTypes.includes(documentType)) {
+    const fields = await extractDocumentData(filePath, file.type || "", documentType);
+    if (fields) extractedData = JSON.stringify(fields);
+  }
 
-  return NextResponse.json(doc, { status: 201 });
+  const doc = await prisma.$queryRawUnsafe<any[]>(
+    `INSERT INTO Document (id, name, fileUrl, fileType, fileSize, documentType, uploadedById, candidateId, mrfId, approvalStatus, extractedData, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     RETURNING *`,
+    `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    file.name, fileUrl, file.type || "application/octet-stream", file.size,
+    documentType, userId, resolvedCandidateId || null, mrfId || null,
+    approvalStatus, extractedData, new Date().toISOString()
+  );
+
+  return NextResponse.json(doc[0], { status: 201 });
 }

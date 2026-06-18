@@ -10,12 +10,20 @@ export async function GET() {
   if (!["ADMIN", "HR"].includes(role || "")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const userId = (session.user as { id?: string })?.id!;
 
-  const emails = await prisma.email.findMany({
-    where: { fromId: userId },
-    include: { candidate: { select: { firstName: true, lastName: true } } },
-    orderBy: { sentAt: "desc" },
-  });
-  return NextResponse.json(emails);
+  const emails = await prisma.$queryRawUnsafe<any[]>(
+    `SELECT e.*, m.id as mrf_id, m.mrfNumber, m.title as mrf_title
+     FROM Email e
+     LEFT JOIN MRF m ON m.id = e.mrfId
+     WHERE e.fromId = ?
+     ORDER BY e.sentAt DESC`,
+    userId
+  );
+  // Reshape mrf sub-object for client
+  const shaped = emails.map((e) => ({
+    ...e,
+    mrf: e.mrf_id ? { id: e.mrf_id, mrfNumber: e.mrfNumber, title: e.mrf_title } : null,
+  }));
+  return NextResponse.json(shaped);
 }
 
 export async function POST(req: NextRequest) {
