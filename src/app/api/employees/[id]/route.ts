@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -13,8 +14,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // Employees can update their own onboardingStep or employeeType
   if (role === "EMPLOYEE") {
-    const candidate = await prisma.candidate.findFirst({ where: { userId } });
-    const employee = candidate ? await prisma.employee.findUnique({ where: { candidateId: candidate.id } }) : null;
+    const candidate = await db("RECRUIT_T_Candidate").where({ userId }).first();
+    const employee = candidate ? await db("RECRUIT_T_Employee").where({ candidateId: candidate.id }).first() : null;
     if (!employee || employee.id !== id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -27,23 +28,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (Object.keys(allowedFields).length === 0) {
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
     }
-    const updated = await prisma.employee.update({ where: { id }, data: allowedFields });
+    allowedFields.updatedAt = new Date();
+    const [updated] = await db("RECRUIT_T_Employee").where({ id }).update(allowedFields).returning("*");
     return NextResponse.json(updated);
   }
 
-  // Admin/HR can update any employee fields
-  if (!["ADMIN", "HR"].includes(role || "")) {
+  // Admin/HR (or any role with MANAGE_EMPLOYEES) can update any employee fields
+  if (!hasPermission(session, "MANAGE_EMPLOYEES")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const body = await req.json();
-  const updated = await prisma.employee.update({
-    where: { id },
-    data: body,
-    include: {
-      candidate: { select: { firstName: true, lastName: true, email: true } },
-      branch: { select: { name: true } },
-    },
-  });
-  return NextResponse.json(updated);
+  const [updated] = await db("RECRUIT_T_Employee")
+    .where({ id })
+    .update({ ...body, updatedAt: new Date() })
+    .returning("*");
+
+  const [candidate, branch] = await Promise.all([
+    db("RECRUIT_T_Candidate").where({ id: updated.candidateId }).select("firstName", "lastName", "email").first(),
+    updated.branchId ? db("RECRUIT_T_Branch").where({ id: updated.branchId }).select("name").first() : null,
+  ]);
+
+  return NextResponse.json({ ...updated, candidate: candidate || null, branch: branch || null });
 }

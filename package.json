@@ -9,12 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@auth/prisma-adapter": "^2.11.2",
     "@hookform/resolvers": "^5.4.0",
-    "@libsql/client": "^0.17.3",
-    "@prisma/adapter-better-sqlite3": "^7.8.0",
-    "@prisma/adapter-libsql": "^7.8.0",
-    "@prisma/client": "^7.8.0",
+    "@paralleldrive/cuid2": "^3.3.0",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-avatar": "^1.1.11",
@@ -32,21 +28,20 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toast": "^1.2.15",
     "@types/bcryptjs": "^2.4.6",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/multer": "^2.1.0",
     "@types/nodemailer": "^8.0.0",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.10.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
+    "knex": "^3.3.0",
     "lucide-react": "^1.17.0",
     "multer": "^2.1.1",
     "next": "16.2.7",
     "next-auth": "^4.24.14",
     "nodemailer": "^7.0.13",
+    "oracledb": "^7.0.1",
     "pdf-parse": "^2.4.5",
-    "prisma": "^7.8.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-hook-form": "^7.77.0",
@@ -56,6 +51,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/oracledb": "^7.0.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "dotenv": "^17.4.2",
@@ -63,5 +59,10 @@
     "eslint-config-next": "16.2.7",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "allowScripts": {
+    "oracledb@7.0.1": true,
+    "sharp@0.34.5": true,
+    "unrs-resolver@1.12.2": true
   }
 }

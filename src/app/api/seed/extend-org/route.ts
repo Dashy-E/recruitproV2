@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { newId } from "@/lib/id";
 
 // Idempotent: adds missing states and branches without duplicating existing ones.
 // South West Division: Gandhidham, Mumbai, Udaipur, Chennai, Hospet, Goa
@@ -7,13 +8,20 @@ import { prisma } from "@/lib/prisma";
 
 export async function POST() {
   try {
-    const india = await prisma.country.findFirst({ where: { locationType: "INDIA" } });
+    const now = new Date();
+    const india = await db("RECRUIT_T_Country").where({ locationType: "INDIA" }).first();
     if (!india) {
       return NextResponse.json({ error: "India country not found. Please seed first." }, { status: 400 });
     }
 
-    const swDiv = await prisma.division.findFirst({ where: { countryId: india.id, name: { contains: "South West" } } });
-    const ecDiv = await prisma.division.findFirst({ where: { countryId: india.id, name: { contains: "East Central" } } });
+    const swDiv = await db("RECRUIT_T_Division")
+      .where({ countryId: india.id })
+      .whereRaw('UPPER("name") LIKE UPPER(?)', [`%South West%`])
+      .first();
+    const ecDiv = await db("RECRUIT_T_Division")
+      .where({ countryId: india.id })
+      .whereRaw('UPPER("name") LIKE UPPER(?)', [`%East Central%`])
+      .first();
 
     if (!swDiv || !ecDiv) {
       return NextResponse.json({ error: "Divisions not found. Please seed first." }, { status: 400 });
@@ -23,20 +31,22 @@ export async function POST() {
 
     // Helper: find or create state
     async function ensureState(name: string, divisionId: string) {
-      const existing = await prisma.state.findFirst({ where: { name, divisionId } });
+      const existing = await db("RECRUIT_T_State").where({ name, divisionId }).first();
       if (existing) return existing;
-      const created = await prisma.state.create({ data: { name, divisionId } });
+      const id = newId();
+      await db("RECRUIT_T_State").insert({ id, name, divisionId, createdAt: now, updatedAt: now });
       added.push(`State: ${name}`);
-      return created;
+      return { id, name, divisionId };
     }
 
     // Helper: find or create branch
     async function ensureBranch(name: string, code: string, countryId: string, stateId: string) {
-      const existing = await prisma.branch.findFirst({ where: { code } });
+      const existing = await db("RECRUIT_T_Branch").where({ code }).first();
       if (existing) return existing;
-      const created = await prisma.branch.create({ data: { name, code, countryId, stateId } });
+      const id = newId();
+      await db("RECRUIT_T_Branch").insert({ id, name, code, countryId, stateId, createdAt: now, updatedAt: now });
       added.push(`Branch: ${name}`);
-      return created;
+      return { id, name, code, countryId, stateId };
     }
 
     // ── South West Division ──────────────────────────────────────────

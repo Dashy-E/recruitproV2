@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { newId } from "@/lib/id";
+import { hasPermission } from "@/lib/permissions";
 import { unlink } from "fs/promises";
 import { join } from "path";
 
@@ -9,8 +11,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const role = (session.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) {
+  if (!hasPermission(session, "MANAGE_DOCUMENTS")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -21,11 +22,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 
-  const docs = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT d.*, c.userId FROM Document d LEFT JOIN Candidate c ON c.id = d.candidateId WHERE d.id = ?`, id
-  );
-  if (!docs.length) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const doc = docs[0];
+  const doc = await db("RECRUIT_T_Document as d")
+    .leftJoin("RECRUIT_T_Candidate as c", "c.id", "d.candidateId")
+    .where("d.id", id)
+    .select("d.*", "c.userId")
+    .first();
+  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (approvalStatus === "REJECTED") {
     // Delete physical file
@@ -35,37 +37,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     } catch { /* file may already be missing */ }
 
     // Delete DB record
-    await prisma.$queryRawUnsafe(`DELETE FROM Document WHERE id = ?`, id);
+    await db("RECRUIT_T_Document").where({ id }).del();
 
     // Notify the document owner
     if (doc.userId) {
-      const userRows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT role FROM User WHERE id = ?`, doc.userId
-      );
-      const ownerRole = userRows[0]?.role || "CANDIDATE";
+      const owner = await db("RECRUIT_T_User").where({ id: doc.userId }).select("role").first();
+      const ownerRole = owner?.role || "CANDIDATE";
       const notifLink = ownerRole === "EMPLOYEE" ? "/dashboard/employee-portal" : "/dashboard";
-      const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const now = new Date().toISOString();
       const reason = approvalNotes ? ` Reason: ${approvalNotes}` : "";
-      await prisma.$queryRawUnsafe(
-        `INSERT INTO Notification (id, userId, title, message, link, isRead, createdAt) VALUES (?, ?, ?, ?, ?, 0, ?)`,
-        notifId, doc.userId,
-        "Document Rejected — Please Re-upload",
-        `Your document "${doc.name}" was rejected and removed.${reason} Please upload a replacement.`,
-        notifLink, now
-      );
+      await db("RECRUIT_T_Notification").insert({
+        id: newId(),
+        userId: doc.userId,
+        type: "DOCUMENT",
+        title: "Document Rejected — Please Re-upload",
+        message: `Your document "${doc.name}" was rejected and removed.${reason} Please upload a replacement.`,
+        link: notifLink,
+        isRead: 0,
+        createdAt: new Date(),
+      });
     }
 
     return NextResponse.json({ success: true, deleted: true });
   }
 
   // APPROVED — just update status
-  await prisma.$queryRawUnsafe(
-    `UPDATE Document SET approvalStatus = ?, approvalNotes = ? WHERE id = ?`,
-    approvalStatus,
-    approvalNotes || null,
-    id
-  );
+  await db("RECRUIT_T_Document")
+    .where({ id })
+    .update({ approvalStatus, approvalNotes: approvalNotes || null });
   return NextResponse.json({ success: true });
 }
 
@@ -73,22 +71,20 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const role = (session.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) {
+  if (!hasPermission(session, "MANAGE_DOCUMENTS")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { id } = await params;
 
-  const docs = await prisma.$queryRawUnsafe<any[]>(`SELECT * FROM Document WHERE id = ?`, id);
-  if (!docs.length) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const doc = docs[0];
+  const doc = await db("RECRUIT_T_Document").where({ id }).first();
+  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
     const filename = doc.fileUrl?.split("/uploads/")[1];
     if (filename) await unlink(join(process.cwd(), "public", "uploads", filename));
   } catch { /* file may already be missing */ }
 
-  await prisma.$queryRawUnsafe(`DELETE FROM Document WHERE id = ?`, id);
+  await db("RECRUIT_T_Document").where({ id }).del();
   return NextResponse.json({ success: true });
 }

@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { newId } from "@/lib/id";
+import { hasPermission } from "@/lib/permissions";
+import bcrypt from "bcryptjs";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const role = (session.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) {
+  if (!hasPermission(session, "MANAGE_CANDIDATES")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -16,29 +18,77 @@ export async function GET(req: NextRequest) {
   const stage = searchParams.get("stage");
   const mrfId = searchParams.get("mrfId");
 
-  const candidates = await prisma.candidate.findMany({
-    where: {
-      ...(stage ? { currentStage: stage } : {}),
-      ...(mrfId ? { mrfId } : {}),
-    },
-    include: {
-      user: { select: { name: true, email: true } },
-      mrf: { include: { department: true, branch: { include: { state: true, country: true } }, country: true } },
-      stageHistory: { orderBy: { changedAt: "desc" } },
-      employee: { select: { id: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const candidates: any[] = await db("RECRUIT_T_Candidate")
+    .modify((qb) => {
+      if (stage) qb.where({ currentStage: stage });
+      if (mrfId) qb.where({ mrfId });
+    })
+    .orderBy("createdAt", "desc");
 
-  return NextResponse.json(candidates);
+  if (!candidates.length) return NextResponse.json([]);
+
+  const userIds = candidates.map((c: any) => c.userId);
+  const mrfIds = [...new Set(candidates.map((c: any) => c.mrfId).filter(Boolean))];
+  const candidateIds = candidates.map((c: any) => c.id);
+
+  const usersQuery = db("RECRUIT_T_User").whereIn("id", userIds).select("id", "name", "email");
+  const mrfsQuery = db("RECRUIT_T_MRF").whereIn("id", mrfIds);
+  const stageHistoryQuery = db("RECRUIT_T_CandidateStageHistory").whereIn("candidateId", candidateIds).orderBy("changedAt", "desc");
+  const employeesQuery = db("RECRUIT_T_Employee").whereIn("candidateId", candidateIds).select("id", "candidateId");
+  const [users, mrfs, stageHistory, employees] = await Promise.all([usersQuery, mrfsQuery, stageHistoryQuery, employeesQuery]);
+
+  const departmentIds = [...new Set(mrfs.map((m: any) => m.departmentId).filter(Boolean))];
+  const branchIds = [...new Set(mrfs.map((m: any) => m.branchId).filter(Boolean))];
+  const countryIds = [...new Set(mrfs.map((m: any) => m.countryId).filter(Boolean))];
+  const [departments, branches, countries] = await Promise.all([
+    db("RECRUIT_T_Department").whereIn("id", departmentIds),
+    db("RECRUIT_T_Branch").whereIn("id", branchIds),
+    db("RECRUIT_T_Country").whereIn("id", countryIds),
+  ]);
+  const stateIds = [...new Set(branches.map((b: any) => b.stateId).filter(Boolean))];
+  const branchCountryIds = [...new Set(branches.map((b: any) => b.countryId).filter(Boolean))];
+  const [states, branchCountries] = await Promise.all([
+    db("RECRUIT_T_State").whereIn("id", stateIds),
+    db("RECRUIT_T_Country").whereIn("id", branchCountryIds),
+  ]);
+
+  const mrfsWithRelations = mrfs.map((m: any) => ({
+    ...m,
+    department: departments.find((d: any) => d.id === m.departmentId) || null,
+    branch: (() => {
+      const b = branches.find((x: any) => x.id === m.branchId);
+      if (!b) return null;
+      return {
+        ...b,
+        state: states.find((s: any) => s.id === b.stateId) || null,
+        country: branchCountries.find((c: any) => c.id === b.countryId) || null,
+      };
+    })(),
+    country: countries.find((c: any) => c.id === m.countryId) || null,
+  }));
+
+  const result = candidates.map((c: any) => ({
+    ...c,
+    user: (() => {
+      const u = users.find((x: any) => x.id === c.userId);
+      return u ? { name: u.name, email: u.email } : null;
+    })(),
+    mrf: c.mrfId ? mrfsWithRelations.find((m: any) => m.id === c.mrfId) || null : null,
+    stageHistory: stageHistory.filter((s: any) => s.candidateId === c.id),
+    employee: (() => {
+      const e = employees.find((x: any) => x.candidateId === c.id);
+      return e ? { id: e.id } : null;
+    })(),
+  }));
+
+  return NextResponse.json(result);
 }
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const role = (session.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) {
+  if (!hasPermission(session, "MANAGE_CANDIDATES")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -46,26 +96,42 @@ export async function POST(req: NextRequest) {
   const { firstName, lastName, email, phone, mrfId } = body;
 
   // Create user account for candidate
-  const existingUser = await prisma.user.findUnique({ where: { email } });
+  const existingUser = await db("RECRUIT_T_User").where({ email }).first();
   let userId = existingUser?.id;
 
   let tempPassword: string | undefined;
   if (!existingUser) {
-    const bcrypt = await import("bcryptjs");
     tempPassword = Math.random().toString(36).slice(-8);
-    const user = await prisma.user.create({
-      data: {
-        name: `${firstName} ${lastName}`,
-        email,
-        password: await bcrypt.hash(tempPassword, 10),
-        role: "CANDIDATE",
-      },
+    userId = newId();
+    const now = new Date();
+
+    // Auto-derive a unique username from the email local-part since this
+    // HR/Admin-driven flow doesn't collect one directly.
+    const base = email.split("@")[0];
+    let userName = base;
+    let suffix = 1;
+    while (await db("RECRUIT_T_User").where({ userName }).first()) {
+      userName = `${base}${++suffix}`;
+    }
+
+    await db("RECRUIT_T_User").insert({
+      id: userId,
+      name: `${firstName} ${lastName}`,
+      userName,
+      email,
+      password: await bcrypt.hash(tempPassword, 10),
+      role: "CANDIDATE",
+      createdAt: now,
+      updatedAt: now,
     });
-    userId = user.id;
   }
 
-  const candidate = await prisma.candidate.create({
-    data: {
+  const candidateId = newId();
+  const now = new Date();
+
+  await db.transaction(async (trx) => {
+    await trx("RECRUIT_T_Candidate").insert({
+      id: candidateId,
       userId: userId!,
       mrfId: mrfId || null,
       firstName,
@@ -73,12 +139,27 @@ export async function POST(req: NextRequest) {
       email,
       phone,
       currentStage: "APPLIED",
-      stageHistory: {
-        create: { toStage: "APPLIED", notes: "Candidate added to system" },
-      },
-    },
-    include: { user: { select: { name: true } }, mrf: true },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await trx("RECRUIT_T_CandidateStageHistory").insert({
+      id: newId(),
+      candidateId,
+      toStage: "APPLIED",
+      notes: "Candidate added to system",
+      changedAt: now,
+    });
   });
 
-  return NextResponse.json({ ...candidate, tempPassword }, { status: 201 });
+  const [candidate, user, mrf] = await Promise.all([
+    db("RECRUIT_T_Candidate").where({ id: candidateId }).first(),
+    db("RECRUIT_T_User").where({ id: userId }).select("name").first(),
+    mrfId ? db("RECRUIT_T_MRF").where({ id: mrfId }).first() : null,
+  ]);
+
+  return NextResponse.json(
+    { ...candidate, user: user ? { name: user.name } : null, mrf: mrf || null, tempPassword },
+    { status: 201 }
+  );
 }

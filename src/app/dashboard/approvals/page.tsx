@@ -57,15 +57,16 @@ const STATUS_COLORS: Record<string, string> = {
   REJECTED: "bg-red-100 text-red-800",
 };
 
-const ROLE_TO_PENDING: Record<string, string> = {
-  DIVISIONAL_MANAGER: "PENDING_DIVISIONAL",
-  FUNCTIONAL_HEAD: "PENDING_FUNCTIONAL",
-  COUNTRY_MANAGER: "PENDING_COUNTRY",
+const STATUS_TO_LEVEL: Record<string, string> = {
+  PENDING_DIVISIONAL: "DIVISIONAL",
+  PENDING_FUNCTIONAL: "FUNCTIONAL",
+  PENDING_COUNTRY: "COUNTRY",
 };
 
 export default function ApprovalsPage() {
   const { data: session } = useSession();
   const role = (session?.user as { role?: string })?.role || "";
+  const approvalLevel = (session?.user as { approvalLevel?: string | null })?.approvalLevel ?? null;
   const [mrfs, setMrfs] = useState<MRF[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionDialog, setActionDialog] = useState<{ mrf: MRF; action: "approve" | "reject" } | null>(null);
@@ -73,8 +74,10 @@ export default function ApprovalsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [filter, setFilter] = useState<"pending" | "all">("pending");
 
-  const isManager = ["DIVISIONAL_MANAGER", "FUNCTIONAL_HEAD", "COUNTRY_MANAGER"].includes(role);
-  const isAdminOrHR = ["ADMIN", "HR"].includes(role);
+  // "ANY" is a universal approver (matches the old ADMIN/HR/COUNTRY_MANAGER
+  // bypass); other levels only act on the matching pending stage.
+  const isUniversalApprover = approvalLevel === "ANY";
+  const canActOnStatus = (status: string) => isUniversalApprover || (!!approvalLevel && approvalLevel === STATUS_TO_LEVEL[status]);
 
   const fetchMRFs = () => {
     fetch("/api/mrfs")
@@ -84,17 +87,9 @@ export default function ApprovalsPage() {
 
   useEffect(() => { fetchMRFs(); }, []);
 
-  const myPendingStatus = ROLE_TO_PENDING[role];
-
   const ALL_PENDING = ["PENDING_DIVISIONAL", "PENDING_FUNCTIONAL", "PENDING_COUNTRY"];
 
-  const pendingMRFs = mrfs.filter((m) => {
-    if (isAdminOrHR) return ALL_PENDING.includes(m.status);
-    // COUNTRY_MANAGER acts as universal manager — sees all pending levels
-    if (role === "COUNTRY_MANAGER") return ALL_PENDING.includes(m.status);
-    if (isManager) return m.status === myPendingStatus;
-    return false;
-  });
+  const pendingMRFs = mrfs.filter((m) => ALL_PENDING.includes(m.status) && canActOnStatus(m.status));
 
   const displayMRFs = filter === "pending" ? pendingMRFs : mrfs.filter((m) => !["DRAFT"].includes(m.status));
 
@@ -121,7 +116,7 @@ export default function ApprovalsPage() {
     return <div className="py-20 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-gray-400" /></div>;
   }
 
-  if (!isManager && !isAdminOrHR) {
+  if (!approvalLevel) {
     return (
       <div className="py-20 text-center text-gray-500">
         <ClipboardList className="mx-auto h-12 w-12 text-gray-300 mb-3" />
@@ -137,9 +132,9 @@ export default function ApprovalsPage() {
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Approval Portal</h2>
           <p className="text-sm text-gray-500 mt-1">
-            {isManager
-              ? `Logged in as ${role.replace(/_/g, " ")} — showing MRFs at your approval level`
-              : "Admin/HR view — all pending MRFs across all levels"}
+            {isUniversalApprover
+              ? "Admin/HR view — all pending MRFs across all levels"
+              : `Logged in as ${role.replace(/_/g, " ")} — showing MRFs at your approval level`}
           </p>
         </div>
         <div className="flex gap-2">
@@ -163,9 +158,7 @@ export default function ApprovalsPage() {
       ) : (
         <div className="space-y-4">
           {displayMRFs.map((mrf) => {
-            const canAct = (isAdminOrHR && ALL_PENDING.includes(mrf.status)) ||
-              (role === "COUNTRY_MANAGER" && ALL_PENDING.includes(mrf.status)) ||
-              (isManager && mrf.status === myPendingStatus);
+            const canAct = ALL_PENDING.includes(mrf.status) && canActOnStatus(mrf.status);
 
             return (
               <Card key={mrf.id} className={`border-l-4 ${canAct ? "border-l-blue-500" : "border-l-gray-200"}`}>

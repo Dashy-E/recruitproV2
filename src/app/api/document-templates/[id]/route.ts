@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 import { unlink } from "fs/promises";
 import { join } from "path";
 
@@ -9,17 +10,13 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const role = (session.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) {
+  if (!hasPermission(session, "MANAGE_DOCUMENTS")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { id } = await params;
-  const rows = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT * FROM DocumentTemplate WHERE id = ?`, id
-  );
-  if (!rows.length) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const template = rows[0];
+  const template = await db("RECRUIT_T_DocumentTemplate").where({ id }).first();
+  if (!template) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Delete physical file (best-effort)
   try {
@@ -27,7 +24,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     await unlink(join(process.cwd(), "public", relative));
   } catch { /* file may already be gone */ }
 
-  await prisma.$queryRawUnsafe(`DELETE FROM DocumentTemplate WHERE id = ?`, id);
+  await db("RECRUIT_T_DocumentTemplate").where({ id }).del();
   return NextResponse.json({ success: true });
 }
 
@@ -35,21 +32,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const role = (session.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) {
+  if (!hasPermission(session, "MANAGE_DOCUMENTS")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { id } = await params;
   const { name, description } = await req.json();
-  const now = new Date().toISOString();
 
-  await prisma.$queryRawUnsafe(
-    `UPDATE DocumentTemplate SET name = ?, description = ?, updatedAt = ? WHERE id = ?`,
-    name, description || null, now, id
-  );
-  const [template] = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT * FROM DocumentTemplate WHERE id = ?`, id
-  );
+  const [template] = await db("RECRUIT_T_DocumentTemplate")
+    .where({ id })
+    .update({ name, description: description || null, updatedAt: new Date() })
+    .returning("*");
+
   return NextResponse.json(template);
 }

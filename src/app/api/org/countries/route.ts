@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { newId } from "@/lib/id";
+import { hasPermission } from "@/lib/permissions";
 
 export async function GET() {
   try {
-    // Use raw SQL so this works regardless of Prisma client cache state
-    const countries = await prisma.$queryRawUnsafe<any[]>(`SELECT * FROM Country ORDER BY name ASC`);
-    const divisions = await prisma.$queryRawUnsafe<any[]>(`SELECT * FROM Division`);
-    const states = await prisma.$queryRawUnsafe<any[]>(`SELECT * FROM State`);
-    const branches = await prisma.$queryRawUnsafe<any[]>(`SELECT * FROM Branch WHERE isActive = 1`);
+    const countries = await db("RECRUIT_T_Country").orderBy("name", "asc");
+    const divisions = await db("RECRUIT_T_Division");
+    const states = await db("RECRUIT_T_State");
+    const branches = await db("RECRUIT_T_Branch").where({ isActive: 1 });
 
     const result = countries.map((country: any) => {
       const countryDivisions = divisions.filter((d: any) => d.countryId === country.id);
@@ -45,15 +46,22 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const role = (session.user as { role?: string })?.role;
-  if (role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermission(session, "MANAGE_ORG")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
   const { name, code, locationType } = body;
 
-  const country = await prisma.country.create({
-    data: { name, code, locationType: locationType || "OVERSEAS" },
-  });
+  const now = new Date();
+  const [country] = await db("RECRUIT_T_Country")
+    .insert({
+      id: newId(),
+      name,
+      code,
+      locationType: locationType || "OVERSEAS",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning("*");
 
   return NextResponse.json(country, { status: 201 });
 }

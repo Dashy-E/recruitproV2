@@ -7,15 +7,29 @@ import {
   LogOut, ChevronDown, ClipboardList, BarChart3, FolderOpen, UserCheck, Mail, ShieldCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+interface NavContext {
+  permissions: string[];
+  approvalLevel: string | null;
+  role: string;
+}
+
+interface NavChild {
+  label: string;
+  href: string;
+  visible?: (ctx: NavContext) => boolean;
+}
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ElementType;
-  roles?: string[];
-  children?: { label: string; href: string }[];
+  visible?: (ctx: NavContext) => boolean;
+  children?: NavChild[];
 }
+
+const has = (ctx: NavContext, ...perms: string[]) => perms.some((p) => ctx.permissions.includes(p));
 
 const navItems: NavItem[] = [
   {
@@ -27,25 +41,25 @@ const navItems: NavItem[] = [
     label: "MRFs",
     href: "/dashboard/mrfs",
     icon: ClipboardList,
-    roles: ["ADMIN", "HR", "BRANCH_MANAGER", "DIVISIONAL_MANAGER", "FUNCTIONAL_HEAD", "COUNTRY_MANAGER"],
+    visible: (ctx) => has(ctx, "CREATE_MRF", "MANAGE_MRF") || !!ctx.approvalLevel,
   },
   {
     label: "Approvals",
     href: "/dashboard/approvals",
     icon: ShieldCheck,
-    roles: ["ADMIN", "HR", "DIVISIONAL_MANAGER", "FUNCTIONAL_HEAD", "COUNTRY_MANAGER"],
+    visible: (ctx) => has(ctx, "MANAGE_MRF") || !!ctx.approvalLevel,
   },
   {
     label: "Candidates",
     href: "/dashboard/candidates",
     icon: Users,
-    roles: ["ADMIN", "HR"],
+    visible: (ctx) => has(ctx, "MANAGE_CANDIDATES"),
   },
   {
     label: "Document Center",
     href: "/dashboard/documents",
     icon: FolderOpen,
-    roles: ["ADMIN", "HR"],
+    visible: (ctx) => has(ctx, "MANAGE_DOCUMENTS"),
     children: [
       { label: "All Documents", href: "/dashboard/documents" },
       { label: "Candidate Docs", href: "/dashboard/candidates" },
@@ -55,19 +69,19 @@ const navItems: NavItem[] = [
     label: "Form Templates",
     href: "/dashboard/document-templates",
     icon: FileText,
-    roles: ["ADMIN", "HR"],
+    visible: (ctx) => has(ctx, "MANAGE_DOCUMENTS"),
   },
   {
     label: "Reports",
     href: "/dashboard/reports",
     icon: BarChart3,
-    roles: ["ADMIN", "HR"],
+    visible: (ctx) => has(ctx, "VIEW_REPORTS"),
   },
   {
     label: "Organization",
     href: "/dashboard/org",
     icon: Building2,
-    roles: ["ADMIN"],
+    visible: (ctx) => has(ctx, "MANAGE_ORG"),
     children: [
       { label: "Countries & Branches", href: "/dashboard/org/countries" },
       { label: "Departments", href: "/dashboard/org/departments" },
@@ -78,34 +92,36 @@ const navItems: NavItem[] = [
     label: "Settings",
     href: "/dashboard/settings",
     icon: Settings,
-    roles: ["ADMIN"],
+    visible: (ctx) => has(ctx, "MANAGE_SETTINGS", "MANAGE_ROLES"),
     children: [
-      { label: "Workflow Stages", href: "/dashboard/settings/stages" },
+      { label: "Workflow Stages", href: "/dashboard/settings/stages", visible: (ctx) => has(ctx, "MANAGE_SETTINGS") },
+      { label: "Roles & Permissions", href: "/dashboard/settings/roles", visible: (ctx) => has(ctx, "MANAGE_ROLES") },
     ],
   },
   {
     label: "Users",
     href: "/dashboard/users",
     icon: Users,
-    roles: ["ADMIN", "HR"],
+    visible: (ctx) => has(ctx, "MANAGE_USERS"),
   },
   {
     label: "Employees",
     href: "/dashboard/employees",
     icon: UserCheck,
-    roles: ["ADMIN", "HR"],
+    visible: (ctx) => has(ctx, "MANAGE_EMPLOYEES"),
   },
   {
     label: "Email",
     href: "/dashboard/email",
     icon: Mail,
-    roles: ["ADMIN", "HR"],
+    visible: (ctx) => has(ctx, "MANAGE_EMAILS"),
   },
   {
     label: "Employee Portal",
     href: "/dashboard/employee-portal",
     icon: UserCheck,
-    roles: ["EMPLOYEE"],
+    // Self-service portal — tied to the EMPLOYEE identity, not a permission.
+    visible: (ctx) => ctx.role === "EMPLOYEE",
   },
 ];
 
@@ -114,7 +130,27 @@ export default function Sidebar() {
   const router = useRouter();
   const { data: session } = useSession();
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
+  const [pendingUserCount, setPendingUserCount] = useState(0);
   const role = (session?.user as { role?: string })?.role || "";
+  const permissions = (session?.user as { permissions?: string[] })?.permissions || [];
+  const approvalLevel = (session?.user as { approvalLevel?: string | null })?.approvalLevel ?? null;
+  const ctx: NavContext = { permissions, approvalLevel, role };
+
+  useEffect(() => {
+    if (!permissions.includes("MANAGE_USERS")) return;
+
+    const fetchPendingCount = async () => {
+      const res = await fetch("/api/users");
+      if (!res.ok) return;
+      const users = await res.json();
+      setPendingUserCount(Array.isArray(users) ? users.filter((u: { isActive: boolean }) => !u.isActive).length : 0);
+    };
+
+    fetchPendingCount();
+    const interval = setInterval(fetchPendingCount, 30000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permissions.join(",")]);
 
   const handleSignOut = async () => {
     await signOut({ redirect: false });
@@ -122,9 +158,12 @@ export default function Sidebar() {
     router.refresh();
   };
 
-  const visibleItems = navItems.filter(
-    (item) => !item.roles || item.roles.includes(role)
-  );
+  const visibleItems = navItems
+    .filter((item) => !item.visible || item.visible(ctx))
+    .map((item) => ({
+      ...item,
+      children: item.children?.filter((child) => !child.visible || child.visible(ctx)),
+    }));
 
   const toggleMenu = (label: string) => {
     setOpenMenus((prev) => ({ ...prev, [label]: !prev[label] }));
@@ -191,7 +230,12 @@ export default function Sidebar() {
                     )}
                   >
                     <Icon className="h-4 w-4" />
-                    {item.label}
+                    <span className="flex-1">{item.label}</span>
+                    {item.label === "Users" && pendingUserCount > 0 && (
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                        {pendingUserCount > 9 ? "9+" : pendingUserCount}
+                      </span>
+                    )}
                   </Link>
                 )}
               </li>

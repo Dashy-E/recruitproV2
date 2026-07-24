@@ -8,51 +8,83 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-const QUICK_ACCOUNTS = [
-  { label: "Admin", email: "admin@recruitpro.com", password: "admin123", color: "bg-purple-600 hover:bg-purple-700 text-white" },
-  { label: "HR", email: "hr@recruitpro.com", password: "hr123", color: "bg-blue-600 hover:bg-blue-700 text-white" },
-  { label: "Branch Mgr", email: "bm@recruitpro.com", password: "bm123", color: "bg-green-600 hover:bg-green-700 text-white" },
-  { label: "Div. Manager", email: "dm@recruitpro.com", password: "dm123", color: "bg-yellow-600 hover:bg-yellow-700 text-white" },
-  { label: "Univ. Manager", email: "um@recruitpro.com", password: "um123", color: "bg-indigo-600 hover:bg-indigo-700 text-white" },
-  { label: "Candidate", email: "candidate@recruitpro.com", password: "candidate123", color: "bg-gray-600 hover:bg-gray-700 text-white" },
-  { label: "Employee", email: "employee@recruitpro.com", password: "emp123", color: "bg-teal-600 hover:bg-teal-700 text-white" },
-];
+type Mode = "login" | "signup";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [quickLoading, setQuickLoading] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("login");
 
-  const doLogin = async (loginEmail: string, loginPassword: string) => {
-    setError("");
-    const result = await signIn("credentials", {
-      email: loginEmail,
-      password: loginPassword,
-      redirect: false,
-    });
+  // Login state
+  const [userName, setUserName] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  // Signup state
+  const [signupName, setSignupName] = useState("");
+  const [signupUserName, setSignupUserName] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [signupConfirm, setSignupConfirm] = useState("");
+  const [signupError, setSignupError] = useState("");
+  const [signupMessage, setSignupMessage] = useState("");
+  const [signupLoading, setSignupLoading] = useState(false);
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setLoginError("");
+    setSignupError("");
+    setSignupMessage("");
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError("");
+    setLoginLoading(true);
+    const result = await signIn("credentials", { userName, password, redirect: false });
+    setLoginLoading(false);
     if (result?.error) {
-      setError("Invalid email or password.");
-      return false;
+      setLoginError("Invalid username or password, or your account is not yet active.");
+      return;
     }
     router.push("/dashboard");
     router.refresh();
-    return true;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    await doLogin(email, password);
-    setLoading(false);
-  };
+    setSignupError("");
+    setSignupMessage("");
 
-  const handleQuickLogin = async (account: typeof QUICK_ACCOUNTS[0]) => {
-    setQuickLoading(account.label);
-    await doLogin(account.email, account.password);
-    setQuickLoading(null);
+    if (signupPassword !== signupConfirm) {
+      setSignupError("Passwords do not match.");
+      return;
+    }
+    if (signupPassword.length < 6) {
+      setSignupError("Password must be at least 6 characters.");
+      return;
+    }
+
+    setSignupLoading(true);
+    const res = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: signupName, userName: signupUserName, email: signupEmail, password: signupPassword }),
+    });
+    const data = await res.json();
+    setSignupLoading(false);
+
+    if (!res.ok) {
+      setSignupError(data.error || "Failed to create account.");
+      return;
+    }
+
+    setSignupMessage(data.message || "Account created. An administrator must activate your account before you can sign in.");
+    setSignupName("");
+    setSignupUserName("");
+    setSignupEmail("");
+    setSignupPassword("");
+    setSignupConfirm("");
   };
 
   return (
@@ -68,68 +100,140 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Quick Access */}
-        <Card className="mb-4">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-gray-700">Quick Access</CardTitle>
-            <CardDescription className="text-xs">Click a role to log in instantly with demo credentials</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-4 gap-2">
-              {QUICK_ACCOUNTS.map((account) => (
-                <button
-                  key={account.label}
-                  onClick={() => handleQuickLogin(account)}
-                  disabled={!!quickLoading || loading}
-                  className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-colors disabled:opacity-60 ${account.color}`}
-                >
-                  {quickLoading === account.label && <Loader2 className="h-3 w-3 animate-spin" />}
-                  {account.label}
-                </button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <div className="mb-4 grid grid-cols-2 rounded-lg border border-gray-200 bg-white p-1">
+          <button
+            type="button"
+            onClick={() => switchMode("login")}
+            className={`rounded-md py-2 text-sm font-medium transition-colors ${
+              mode === "login" ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Log In
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode("signup")}
+            className={`rounded-md py-2 text-sm font-medium transition-colors ${
+              mode === "signup" ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Sign Up
+          </button>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Sign in</CardTitle>
-            <CardDescription>Enter your credentials to access the system</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="you@company.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              {error && (
-                <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">{error}</div>
+        {mode === "login" ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Sign in</CardTitle>
+              <CardDescription>Enter your credentials to access the system</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="userName">Username</Label>
+                  <Input
+                    id="userName"
+                    value={userName}
+                    onChange={(e) => setUserName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                {loginError && (
+                  <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">{loginError}</div>
+                )}
+                <Button type="submit" className="w-full" disabled={loginLoading}>
+                  {loginLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Sign in
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Create an account</CardTitle>
+              <CardDescription>An administrator must activate your account before you can sign in.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {signupMessage ? (
+                <div className="space-y-4">
+                  <div className="rounded-md bg-green-50 p-3 text-sm text-green-700">{signupMessage}</div>
+                  <Button type="button" className="w-full" variant="outline" onClick={() => switchMode("login")}>
+                    Back to Log In
+                  </Button>
+                </div>
+              ) : (
+                <form onSubmit={handleSignup} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="signupName">Full Name</Label>
+                    <Input
+                      id="signupName"
+                      value={signupName}
+                      onChange={(e) => setSignupName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="signupUserName">Username</Label>
+                    <Input
+                      id="signupUserName"
+                      value={signupUserName}
+                      onChange={(e) => setSignupUserName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="signupEmail">Email</Label>
+                    <Input
+                      id="signupEmail"
+                      type="email"
+                      value={signupEmail}
+                      onChange={(e) => setSignupEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="signupPassword">Password</Label>
+                    <Input
+                      id="signupPassword"
+                      type="password"
+                      value={signupPassword}
+                      onChange={(e) => setSignupPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="signupConfirm">Confirm Password</Label>
+                    <Input
+                      id="signupConfirm"
+                      type="password"
+                      value={signupConfirm}
+                      onChange={(e) => setSignupConfirm(e.target.value)}
+                      required
+                    />
+                  </div>
+                  {signupError && (
+                    <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">{signupError}</div>
+                  )}
+                  <Button type="submit" className="w-full" disabled={signupLoading}>
+                    {signupLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Create Account
+                  </Button>
+                </form>
               )}
-              <Button type="submit" className="w-full" disabled={loading || !!quickLoading}>
-                {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                Sign in
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

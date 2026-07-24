@@ -33,21 +33,24 @@ const STATUS_COLORS: Record<string, string> = {
   REJECTED: "destructive",
 };
 
-const MANAGER_PENDING: Record<string, string> = {
-  DIVISIONAL_MANAGER: "PENDING_DIVISIONAL",
-  FUNCTIONAL_HEAD: "PENDING_FUNCTIONAL",
-  COUNTRY_MANAGER: "PENDING_COUNTRY",
+// Level-specific approvers (not universal "ANY" approvers) get a dedicated
+// "pending for me" banner on this list page.
+const LEVEL_TO_STATUS: Record<string, string> = {
+  DIVISIONAL: "PENDING_DIVISIONAL",
+  FUNCTIONAL: "PENDING_FUNCTIONAL",
+  COUNTRY: "PENDING_COUNTRY",
 };
 
 export default function MRFsPage() {
   const { data: session } = useSession();
-  const role = (session?.user as { role?: string })?.role || "";
+  const permissions = (session?.user as { permissions?: string[] })?.permissions || [];
+  const approvalLevel = (session?.user as { approvalLevel?: string | null })?.approvalLevel ?? null;
   const [mrfs, setMrfs] = useState<MRF[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const canCreate = ["ADMIN", "HR", "BRANCH_MANAGER", "COUNTRY_MANAGER"].includes(role);
-  const myPendingStatus = MANAGER_PENDING[role];
+  const canCreate = permissions.includes("CREATE_MRF");
+  const myPendingStatus = approvalLevel && approvalLevel !== "ANY" ? LEVEL_TO_STATUS[approvalLevel] : null;
   const pendingForMe = myPendingStatus ? mrfs.filter((m) => m.status === myPendingStatus) : [];
 
   useEffect(() => {

@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { newId } from "@/lib/id";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
+import { hasPermission } from "@/lib/permissions";
 
 export async function GET() {
-  const templates = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT dt.*, u.name as uploaderName FROM DocumentTemplate dt
-     JOIN User u ON u.id = dt.uploadedById
-     WHERE dt.isActive = 1
-     ORDER BY dt.createdAt DESC`
-  );
+  const templates = await db("RECRUIT_T_DocumentTemplate as dt")
+    .join("RECRUIT_T_User as u", "u.id", "dt.uploadedById")
+    .where("dt.isActive", 1)
+    .orderBy("dt.createdAt", "desc")
+    .select("dt.*", "u.name as uploaderName");
   return NextResponse.json(templates);
 }
 
@@ -19,8 +20,7 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const role = (session.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) {
+  if (!hasPermission(session, "MANAGE_DOCUMENTS")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const userId = (session.user as { id?: string })?.id!;
@@ -43,17 +43,22 @@ export async function POST(req: NextRequest) {
   await writeFile(join(uploadDir, safeFileName), buffer);
   const fileUrl = `/uploads/templates/${safeFileName}`;
 
-  const id = `tmpl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const now = new Date().toISOString();
+  const now = new Date();
 
-  await prisma.$queryRawUnsafe(
-    `INSERT INTO DocumentTemplate (id, name, description, templateType, fileUrl, fileSize, isActive, uploadedById, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-    id, name, description, templateType, fileUrl, file.size, userId, now, now
-  );
+  const [template] = await db("RECRUIT_T_DocumentTemplate")
+    .insert({
+      id: newId(),
+      name,
+      description,
+      templateType,
+      fileUrl,
+      fileSize: file.size,
+      isActive: 1,
+      uploadedById: userId,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning("*");
 
-  const [template] = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT * FROM DocumentTemplate WHERE id = ?`, id
-  );
   return NextResponse.json(template, { status: 201 });
 }

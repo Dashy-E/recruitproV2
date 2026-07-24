@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { newId } from "@/lib/id";
 
 const STAGES = [
   { key: "APPLIED", label: "Applications", stepOrder: 1 },
@@ -32,12 +33,13 @@ const CORPORATE_BRANCHES = [
 
 export async function POST() {
   const log: string[] = [];
+  const now = new Date();
 
   // 1. Seed WorkflowStages (idempotent)
   for (const stage of STAGES) {
-    const existing = await prisma.workflowStage.findUnique({ where: { key: stage.key } });
+    const existing = await db("RECRUIT_T_WorkflowStage").where({ key: stage.key }).first();
     if (!existing) {
-      await prisma.workflowStage.create({ data: stage });
+      await db("RECRUIT_T_WorkflowStage").insert({ id: newId(), ...stage, createdAt: now, updatedAt: now });
       log.push(`Created WorkflowStage: ${stage.key}`);
     } else {
       log.push(`WorkflowStage ${stage.key} already exists — skipped`);
@@ -45,20 +47,18 @@ export async function POST() {
   }
 
   // 2. Corporate Division restructure under India
-  const india = await prisma.country.findFirst({ where: { locationType: "INDIA" } });
+  const india = await db("RECRUIT_T_Country").where({ locationType: "INDIA" }).first();
   if (!india) {
     log.push("India country not found — skipping Corporate restructure");
     return NextResponse.json({ success: true, log });
   }
 
   // Ensure "Corporate" division under India
-  let corporateDiv = await prisma.division.findFirst({
-    where: { countryId: india.id, name: "Corporate" },
-  });
+  let corporateDiv = await db("RECRUIT_T_Division").where({ countryId: india.id, name: "Corporate" }).first();
   if (!corporateDiv) {
-    corporateDiv = await prisma.division.create({
-      data: { name: "Corporate", countryId: india.id },
-    });
+    const id = newId();
+    await db("RECRUIT_T_Division").insert({ id, name: "Corporate", countryId: india.id, createdAt: now, updatedAt: now });
+    corporateDiv = { id, name: "Corporate", countryId: india.id };
     log.push("Created 'Corporate' Division under India");
   } else {
     log.push("'Corporate' Division under India already exists — skipped");
@@ -66,25 +66,20 @@ export async function POST() {
 
   // Create or update each corporate branch linked to this division
   for (const b of CORPORATE_BRANCHES) {
-    const existing = await prisma.branch.findFirst({ where: { code: b.code } });
+    const existing = await db("RECRUIT_T_Branch").where({ code: b.code }).first();
     if (existing) {
       if (existing.divisionId !== corporateDiv.id || existing.countryId !== india.id) {
-        await prisma.branch.update({
-          where: { id: existing.id },
-          data: { divisionId: corporateDiv.id, countryId: india.id },
-        });
+        await db("RECRUIT_T_Branch")
+          .where({ id: existing.id })
+          .update({ divisionId: corporateDiv.id, countryId: india.id, updatedAt: now });
         log.push(`Updated branch '${b.name}' (${b.code}) → Corporate Division under India`);
       } else {
         log.push(`Branch '${b.name}' (${b.code}) already linked correctly — skipped`);
       }
     } else {
-      await prisma.branch.create({
-        data: {
-          name: b.name,
-          code: b.code,
-          countryId: india.id,
-          divisionId: corporateDiv.id,
-        },
+      await db("RECRUIT_T_Branch").insert({
+        id: newId(), name: b.name, code: b.code, countryId: india.id, divisionId: corporateDiv.id,
+        createdAt: now, updatedAt: now,
       });
       log.push(`Created branch '${b.name}' (${b.code}) under Corporate Division`);
     }

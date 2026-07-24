@@ -3,30 +3,34 @@ import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 import { formatDate } from "@/lib/utils";
+import { hasPermission } from "@/lib/permissions";
 import { Settings, Database, Users, Globe, Building2, FileText, Shield } from "lucide-react";
+
+async function count(table: string) {
+  const [row] = await db(table).count<{ count: string }[]>("* as count");
+  return Number(row.count);
+}
 
 export default async function SettingsPage() {
   const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
-  if (role !== "ADMIN") redirect("/dashboard");
+  if (!hasPermission(session, "MANAGE_SETTINGS") && !hasPermission(session, "MANAGE_ROLES")) redirect("/dashboard");
 
   const [userCount, candidateCount, mrfCount, documentCount, countryCount, branchCount, deptCount] = await Promise.all([
-    prisma.user.count(),
-    prisma.candidate.count(),
-    prisma.mRF.count(),
-    prisma.document.count(),
-    prisma.country.count(),
-    prisma.branch.count(),
-    prisma.department.count(),
+    count("RECRUIT_T_User"),
+    count("RECRUIT_T_Candidate"),
+    count("RECRUIT_T_MRF"),
+    count("RECRUIT_T_Document"),
+    count("RECRUIT_T_Country"),
+    count("RECRUIT_T_Branch"),
+    count("RECRUIT_T_Department"),
   ]);
 
-  const recentUsers = await prisma.user.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 5,
-    select: { name: true, email: true, role: true, createdAt: true },
-  });
+  const recentUsers = await db("RECRUIT_T_User")
+    .orderBy("createdAt", "desc")
+    .limit(5)
+    .select("name", "email", "role", "createdAt");
 
   const stats = [
     { label: "Total Users", value: userCount, icon: Users, color: "text-blue-600 bg-blue-50" },
@@ -82,10 +86,10 @@ export default async function SettingsPage() {
           <CardHeader><CardTitle className="flex items-center gap-2"><Database className="h-5 w-5" />System Info</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
             {[
-              { label: "Database", value: "SQLite (dev.db)" },
+              { label: "Database", value: "Oracle Database" },
               { label: "Auth Strategy", value: "JWT (NextAuth v4)" },
               { label: "Framework", value: "Next.js App Router" },
-              { label: "ORM", value: "Prisma v7 + LibSQL" },
+              { label: "Query Builder", value: "Knex.js + node-oracledb" },
               { label: "Environment", value: process.env.NODE_ENV || "development" },
               { label: "Approval Levels", value: "3 (Divisional → Functional → Country)" },
               { label: "Candidate Stages", value: "10 stages" },
@@ -127,7 +131,7 @@ export default async function SettingsPage() {
         <CardHeader><CardTitle>Recently Added Users</CardTitle></CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {recentUsers.map((u) => (
+            {recentUsers.map((u: any) => (
               <div key={u.email} className="flex items-center gap-3">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-sm font-medium text-gray-600">
                   {u.name.charAt(0).toUpperCase()}

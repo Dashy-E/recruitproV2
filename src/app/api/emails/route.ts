@@ -1,25 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { newId } from "@/lib/id";
+import { hasPermission } from "@/lib/permissions";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const role = (session.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermission(session, "MANAGE_EMAILS")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const userId = (session.user as { id?: string })?.id!;
 
-  const emails = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT e.*, m.id as mrf_id, m.mrfNumber, m.title as mrf_title
-     FROM Email e
-     LEFT JOIN MRF m ON m.id = e.mrfId
-     WHERE e.fromId = ?
-     ORDER BY e.sentAt DESC`,
-    userId
-  );
+  const emails = await db("RECRUIT_T_Email as e")
+    .leftJoin("RECRUIT_T_MRF as m", "m.id", "e.mrfId")
+    .where("e.fromId", userId)
+    .orderBy("e.sentAt", "desc")
+    .select("e.*", "m.id as mrf_id", "m.mrfNumber", "m.title as mrf_title");
+
   // Reshape mrf sub-object for client
-  const shaped = emails.map((e) => ({
+  const shaped = emails.map((e: any) => ({
     ...e,
     mrf: e.mrf_id ? { id: e.mrf_id, mrfNumber: e.mrfNumber, title: e.mrf_title } : null,
   }));
@@ -29,8 +28,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const role = (session.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermission(session, "MANAGE_EMAILS")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const userId = (session.user as { id?: string })?.id!;
 
   const { toEmail, subject, body, candidateId, mrfId } = await req.json();
@@ -58,8 +56,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const email = await prisma.email.create({
-    data: { fromId: userId, toEmail, subject, body, candidateId: candidateId || null, mrfId: mrfId || null },
-  });
+  const [email] = await db("RECRUIT_T_Email")
+    .insert({
+      id: newId(),
+      fromId: userId,
+      toEmail,
+      subject,
+      body,
+      candidateId: candidateId || null,
+      mrfId: mrfId || null,
+      isRead: 0,
+      sentAt: new Date(),
+    })
+    .returning("*");
+
   return NextResponse.json(email, { status: 201 });
 }

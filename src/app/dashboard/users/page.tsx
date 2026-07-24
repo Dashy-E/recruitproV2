@@ -10,15 +10,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Search, Loader2, UserCheck, Pencil } from "lucide-react";
-import { formatDate, USER_ROLES } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 
 interface User {
-  id: string; name: string; email: string; role: string; isActive: boolean; createdAt: string;
+  id: string; name: string; userName: string; email: string; role: string; isActive: boolean; createdAt: string;
   branch: { name: string } | null; country: { name: string } | null;
 }
 interface Branch { id: string; name: string; code: string }
 interface Country { id: string; name: string }
 interface Department { id: string; name: string }
+interface Role { id: string; key: string; label: string; isSystem: boolean; isActive: boolean; approvalLevel: string | null; permissions: string[] }
 
 const ROLE_COLORS: Record<string, string> = {
   ADMIN: "bg-purple-100 text-purple-700",
@@ -29,6 +30,7 @@ const ROLE_COLORS: Record<string, string> = {
   COUNTRY_MANAGER: "bg-red-100 text-red-700",
   CANDIDATE: "bg-gray-100 text-gray-700",
 };
+const DEFAULT_ROLE_COLOR = "bg-slate-100 text-slate-700";
 
 const ROLE_HINTS: Record<string, string> = {
   HR: "Assign a country or branch",
@@ -43,6 +45,7 @@ export default function UsersPage() {
   const myRole = (session?.user as { role?: string })?.role || "";
 
   const [users, setUsers] = useState<User[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -52,13 +55,13 @@ export default function UsersPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
-    name: "", email: "", password: "", userRole: "HR",
+    name: "", userName: "", email: "", password: "", userRole: "HR",
     branchId: "", countryId: "", departmentId: "",
   });
 
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({
-    name: "", email: "", userRole: "", branchId: "", countryId: "", password: "", confirmPassword: "",
+    name: "", userName: "", email: "", userRole: "", branchId: "", countryId: "", password: "", confirmPassword: "", isActive: true,
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState("");
@@ -72,18 +75,27 @@ export default function UsersPage() {
     fetch("/api/org/countries").then((r) => r.json()).then(setCountries);
     fetch("/api/org/branches").then((r) => r.json()).then(setBranches);
     fetch("/api/org/departments").then((r) => r.json()).then(setDepartments);
+    fetch("/api/roles").then((r) => r.json()).then((d) => setRoles(Array.isArray(d) ? d : []));
   }, []);
 
   const filtered = users.filter(
-    (u) => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase())
+    (u) =>
+      u.name.toLowerCase().includes(search.toLowerCase()) ||
+      u.email.toLowerCase().includes(search.toLowerCase()) ||
+      u.userName?.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Roles HR can create (no ADMIN, no CANDIDATE)
-  const creatableRoles = Object.entries(USER_ROLES).filter(([k]) => {
-    if (k === "CANDIDATE") return false;
-    if (k === "ADMIN" && myRole !== "ADMIN") return false;
-    return true;
-  });
+  // Roles HR can create (no ADMIN, no CANDIDATE — candidates are created via the candidate flow)
+  const creatableRoles = roles
+    .filter((r) => r.isActive && r.key !== "CANDIDATE" && (r.key !== "ADMIN" || myRole === "ADMIN"))
+    .map((r): [string, string] => [r.key, r.label]);
+
+  // Roles selectable when editing an existing user — includes CANDIDATE since
+  // self-signed-up accounts default to it and the admin picks the real role
+  // when activating them.
+  const editableRoles = roles
+    .filter((r) => r.isActive && (r.key !== "ADMIN" || myRole === "ADMIN"))
+    .map((r): [string, string] => [r.key, r.label]);
 
   const handleAdd = async () => {
     setError("");
@@ -100,13 +112,13 @@ export default function UsersPage() {
       return;
     }
     setShowAdd(false);
-    setForm({ name: "", email: "", password: "", userRole: "HR", branchId: "", countryId: "", departmentId: "" });
+    setForm({ name: "", userName: "", email: "", password: "", userRole: "HR", branchId: "", countryId: "", departmentId: "" });
     fetchUsers();
   };
 
   const openEdit = (u: User) => {
     setEditUser(u);
-    setEditForm({ name: u.name, email: u.email, userRole: u.role, branchId: "", countryId: "", password: "", confirmPassword: "" });
+    setEditForm({ name: u.name, userName: u.userName, email: u.email, userRole: u.role, branchId: "", countryId: "", password: "", confirmPassword: "", isActive: u.isActive });
     setEditError("");
   };
 
@@ -116,10 +128,12 @@ export default function UsersPage() {
     setEditSubmitting(true);
     const payload: Record<string, unknown> = {
       name: editForm.name,
+      userName: editForm.userName,
       email: editForm.email,
       userRole: editForm.userRole,
       branchId: editForm.branchId || undefined,
       countryId: editForm.countryId || undefined,
+      isActive: editForm.isActive,
     };
     if (editForm.password) payload.password = editForm.password;
     const res = await fetch(`/api/users/${editUser.id}`, {
@@ -156,11 +170,11 @@ export default function UsersPage() {
 
       {/* Role Summary */}
       <div className="flex flex-wrap gap-3">
-        {Object.entries(USER_ROLES).filter(([k]) => k !== "CANDIDATE").map(([key, label]) => (
-          <div key={key} className={`flex items-center gap-2 rounded-lg px-3 py-2 ${ROLE_COLORS[key]}`}>
+        {roles.filter((r) => r.isActive && r.key !== "CANDIDATE").map((r) => (
+          <div key={r.key} className={`flex items-center gap-2 rounded-lg px-3 py-2 ${ROLE_COLORS[r.key] || DEFAULT_ROLE_COLOR}`}>
             <UserCheck className="h-4 w-4" />
-            <span className="text-sm font-medium">{label}</span>
-            <span className="font-bold">{users.filter((u) => u.role === key).length}</span>
+            <span className="text-sm font-medium">{r.label}</span>
+            <span className="font-bold">{users.filter((u) => u.role === r.key).length}</span>
           </div>
         ))}
       </div>
@@ -174,6 +188,8 @@ export default function UsersPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
+              autoComplete="off"
+              name="user-search"
             />
           </div>
         </CardHeader>
@@ -185,6 +201,7 @@ export default function UsersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>Username</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Branch / Country</TableHead>
@@ -197,10 +214,11 @@ export default function UsersPage() {
                 {filtered.map((u) => (
                   <TableRow key={u.id}>
                     <TableCell className="font-medium">{u.name}</TableCell>
+                    <TableCell className="text-sm text-gray-500">{u.userName}</TableCell>
                     <TableCell className="text-sm text-gray-500">{u.email}</TableCell>
                     <TableCell>
-                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_COLORS[u.role]}`}>
-                        {USER_ROLES[u.role as keyof typeof USER_ROLES] || u.role}
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_COLORS[u.role] || DEFAULT_ROLE_COLOR}`}>
+                        {roles.find((r) => r.key === u.role)?.label || u.role}
                       </span>
                     </TableCell>
                     <TableCell className="text-sm text-gray-500">
@@ -235,6 +253,10 @@ export default function UsersPage() {
               <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
             </div>
             <div className="space-y-1">
+              <Label>Username *</Label>
+              <Input value={editForm.userName} onChange={(e) => setEditForm({ ...editForm, userName: e.target.value })} />
+            </div>
+            <div className="space-y-1">
               <Label>Email *</Label>
               <Input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
             </div>
@@ -243,7 +265,7 @@ export default function UsersPage() {
               <Select value={editForm.userRole} onValueChange={(v) => setEditForm({ ...editForm, userRole: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {creatableRoles.map(([key, label]) => (
+                  {editableRoles.map(([key, label]) => (
                     <SelectItem key={key} value={key}>{label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -269,15 +291,29 @@ export default function UsersPage() {
                 </Select>
               </div>
             </div>
+            <div className="border-t pt-3">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300"
+                  checked={editForm.isActive}
+                  onChange={(e) => setEditForm({ ...editForm, isActive: e.target.checked })}
+                />
+                Account Active
+                {!editUser?.isActive && !editForm.isActive && (
+                  <span className="text-xs text-yellow-600">(pending activation — check the box and save to activate)</span>
+                )}
+              </label>
+            </div>
             <div className="border-t pt-3 space-y-3">
               <p className="text-sm font-medium text-gray-700">Change Password <span className="text-gray-400 font-normal">(leave blank to keep current)</span></p>
               <div className="space-y-1">
                 <Label>New Password</Label>
-                <Input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Min. 6 characters" />
+                <Input type="password" autoComplete="new-password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Min. 6 characters" />
               </div>
               <div className="space-y-1">
                 <Label>Confirm Password</Label>
-                <Input type="password" value={editForm.confirmPassword} onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })} placeholder="Re-enter new password" />
+                <Input type="password" autoComplete="new-password" value={editForm.confirmPassword} onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })} placeholder="Re-enter new password" />
                 {editForm.confirmPassword && !editPasswordsMatch && (
                   <p className="text-xs text-red-500">Passwords do not match.</p>
                 )}
@@ -290,7 +326,7 @@ export default function UsersPage() {
             <Button
               onClick={handleEdit}
               disabled={
-                !editForm.name || !editForm.email || editSubmitting ||
+                !editForm.name || !editForm.userName || !editForm.email || editSubmitting ||
                 (!!editForm.password && (editForm.password.length < 6 || !editPasswordsMatch))
               }
             >
@@ -311,12 +347,16 @@ export default function UsersPage() {
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Ravi Patel" />
             </div>
             <div className="space-y-2">
+              <Label>Username *</Label>
+              <Input value={form.userName} onChange={(e) => setForm({ ...form, userName: e.target.value })} placeholder="e.g. rpatel" />
+            </div>
+            <div className="space-y-2">
               <Label>Email *</Label>
               <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="ravi@company.com" />
             </div>
             <div className="space-y-2">
               <Label>Password *</Label>
-              <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Min 6 characters" />
+              <Input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Min 6 characters" />
             </div>
             <div className="space-y-2">
               <Label>Role *</Label>
@@ -375,7 +415,7 @@ export default function UsersPage() {
             <Button
               onClick={handleAdd}
               disabled={
-                !form.name || !form.email || !form.password || submitting ||
+                !form.name || !form.userName || !form.email || !form.password || submitting ||
                 (needsDept && !form.departmentId) ||
                 (needsBranch && !form.branchId)
               }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { toBool } from "@/lib/db-bool";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -12,13 +13,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json();
 
   // Users can only mark their own notifications
-  const notification = await prisma.notification.findFirst({ where: { id, userId } });
+  const notification = await db("RECRUIT_T_Notification").where({ id, userId }).first();
   if (!notification) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const updated = await prisma.notification.update({
-    where: { id },
-    data: { isRead: body.isRead ?? true },
-  });
+  const [updated] = await db("RECRUIT_T_Notification")
+    .where({ id })
+    .update({ isRead: toBool(body.isRead ?? true) })
+    .returning("*");
 
   return NextResponse.json(updated);
 }

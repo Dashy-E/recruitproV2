@@ -53,10 +53,10 @@ const APPROVAL_LEVELS = [
   { key: "COUNTRY_MANAGER", label: "Country Manager", pendingStatus: "PENDING_COUNTRY" },
 ];
 
-const ROLE_TO_PENDING: Record<string, string> = {
-  DIVISIONAL_MANAGER: "PENDING_DIVISIONAL",
-  FUNCTIONAL_HEAD: "PENDING_FUNCTIONAL",
-  COUNTRY_MANAGER: "PENDING_COUNTRY",
+const STATUS_TO_LEVEL: Record<string, string> = {
+  PENDING_DIVISIONAL: "DIVISIONAL",
+  PENDING_FUNCTIONAL: "FUNCTIONAL",
+  PENDING_COUNTRY: "COUNTRY",
 };
 
 const NEXT_LEVEL_LABEL: Record<string, string> = {
@@ -68,6 +68,7 @@ export default function MRFDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: session } = useSession();
   const role = (session?.user as { role?: string })?.role || "";
+  const approvalLevel = (session?.user as { approvalLevel?: string | null })?.approvalLevel ?? null;
   const [mrf, setMrf] = useState<MRFDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -90,10 +91,13 @@ export default function MRFDetailPage() {
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
-  const isAdminOrHR = ["ADMIN", "HR"].includes(role);
-  const isManagerForThisLevel = mrf ? ROLE_TO_PENDING[role] === mrf.status : false;
-  const canAct = (isAdminOrHR || isManagerForThisLevel) && mrf?.status?.startsWith("PENDING");
-  const isManagerSelfApproval = isManagerForThisLevel && !isAdminOrHR;
+  const permissions = (session?.user as { permissions?: string[] })?.permissions || [];
+  const canManageMrf = permissions.includes("MANAGE_MRF");
+  const canSendApprovalEmail = permissions.includes("SEND_MRF_APPROVAL_EMAIL");
+  const isUniversalApprover = approvalLevel === "ANY";
+  const isManagerForThisLevel = mrf ? !!approvalLevel && approvalLevel === STATUS_TO_LEVEL[mrf.status] : false;
+  const canAct = (isUniversalApprover || isManagerForThisLevel) && mrf?.status?.startsWith("PENDING");
+  const isManagerSelfApproval = isManagerForThisLevel && !isUniversalApprover;
   const canSubmitApproval = isManagerSelfApproval ? true : !!approverName;
 
   const fetchMRF = () => {
@@ -189,7 +193,7 @@ export default function MRFDetailPage() {
               <Printer className="h-4 w-4" /> Print / PDF
             </Button>
           )}
-          {mrf.status === "REJECTED" && isAdminOrHR && (
+          {mrf.status === "REJECTED" && canManageMrf && (
             <>
               <Link href={`/dashboard/mrfs/${id}/edit`}>
                 <Button variant="outline">
@@ -224,8 +228,8 @@ export default function MRFDetailPage() {
       {mrf.status === "REJECTED" && mrf.rejectionReason && (
         <div className="rounded-lg bg-red-50 border border-red-200 p-4">
           <p className="text-sm font-medium text-red-700">Rejected: {mrf.rejectionReason}</p>
-          {isAdminOrHR && (
-            <p className="text-xs text-red-600 mt-1">As Admin/HR you can edit this MRF and restart the approval process.</p>
+          {canManageMrf && (
+            <p className="text-xs text-red-600 mt-1">You can edit this MRF and restart the approval process.</p>
           )}
         </div>
       )}
@@ -317,8 +321,8 @@ export default function MRFDetailPage() {
               })}
             </div>
 
-            {/* Send to next approver button (if pending and admin/HR) */}
-            {mrf.status.startsWith("PENDING") && isAdminOrHR && (
+            {/* Send to next approver button (if pending and permitted) */}
+            {mrf.status.startsWith("PENDING") && canSendApprovalEmail && (
               <div className="mt-4 pt-4 border-t">
                 <Button
                   size="sm"

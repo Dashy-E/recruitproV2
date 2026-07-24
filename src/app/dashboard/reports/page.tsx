@@ -1,46 +1,59 @@
-import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { CANDIDATE_STAGES, MRF_STATUSES, formatDate } from "@/lib/utils";
+import { hasPermission } from "@/lib/permissions";
 import { BarChart3, Users, ClipboardList, CheckCircle } from "lucide-react";
+
+async function count(table: string, where?: Record<string, unknown>) {
+  const query = db(table);
+  if (where) query.where(where);
+  const [row] = await query.count<{ count: string }[]>("* as count");
+  return Number(row.count);
+}
 
 export default async function ReportsPage() {
   const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) redirect("/dashboard");
+  if (!hasPermission(session, "VIEW_REPORTS")) redirect("/dashboard");
 
   const [
     totalMRFs, approvedMRFs, rejectedMRFs, pendingMRFs,
     totalCandidates, onboardedCandidates,
     candidatesByStage, mrfsByDepartment, mrfsByCountry,
-    recentCandidates,
+    recentCandidatesRaw,
   ] = await Promise.all([
-    prisma.mRF.count(),
-    prisma.mRF.count({ where: { status: "APPROVED" } }),
-    prisma.mRF.count({ where: { status: "REJECTED" } }),
-    prisma.mRF.count({ where: { status: { in: ["PENDING_DIVISIONAL", "PENDING_FUNCTIONAL", "PENDING_COUNTRY"] } } }),
-    prisma.candidate.count(),
-    prisma.candidate.count({ where: { currentStage: "ONBOARDED" } }),
-    prisma.candidate.groupBy({ by: ["currentStage"], _count: { id: true } }),
-    prisma.mRF.groupBy({ by: ["departmentId"], _count: { id: true } }),
-    prisma.mRF.groupBy({ by: ["countryId"], _count: { id: true } }),
-    prisma.candidate.findMany({
-      take: 10,
-      orderBy: { createdAt: "desc" },
-      include: { mrf: { include: { department: true, branch: true } } },
-    }),
+    count("RECRUIT_T_MRF"),
+    count("RECRUIT_T_MRF", { status: "APPROVED" }),
+    count("RECRUIT_T_MRF", { status: "REJECTED" }),
+    db("RECRUIT_T_MRF")
+      .whereIn("status", ["PENDING_DIVISIONAL", "PENDING_FUNCTIONAL", "PENDING_COUNTRY"])
+      .count<{ count: string }[]>("* as count")
+      .then((r) => Number(r[0].count)),
+    count("RECRUIT_T_Candidate"),
+    count("RECRUIT_T_Candidate", { currentStage: "ONBOARDED" }),
+    db("RECRUIT_T_Candidate").groupBy("currentStage").select("currentStage").count({ count: "*" }),
+    db("RECRUIT_T_MRF").groupBy("departmentId").select("departmentId").count({ count: "*" }),
+    db("RECRUIT_T_MRF").groupBy("countryId").select("countryId").count({ count: "*" }),
+    db("RECRUIT_T_Candidate").orderBy("createdAt", "desc").limit(10),
   ]);
 
-  const departments = await prisma.department.findMany({ select: { id: true, name: true } });
-  const countries = await prisma.country.findMany({ select: { id: true, name: true } });
+  const departments = await db("RECRUIT_T_Department").select("id", "name");
+  const countries = await db("RECRUIT_T_Country").select("id", "name");
 
-  const deptMap = Object.fromEntries(departments.map((d) => [d.id, d.name]));
-  const countryMap = Object.fromEntries(countries.map((c) => [c.id, c.name]));
-  const stageMap = Object.fromEntries(candidatesByStage.map((s) => [s.currentStage, s._count.id]));
+  const deptMap = Object.fromEntries(departments.map((d: any) => [d.id, d.name]));
+  const countryMap = Object.fromEntries(countries.map((c: any) => [c.id, c.name]));
+  const stageMap = Object.fromEntries(candidatesByStage.map((s: any) => [s.currentStage, Number(s.count)]));
+
+  const mrfIds = [...new Set(recentCandidatesRaw.map((c: any) => c.mrfId).filter(Boolean))];
+  const mrfs = mrfIds.length ? await db("RECRUIT_T_MRF").whereIn("id", mrfIds) : [];
+  const recentCandidates = recentCandidatesRaw.map((c: any) => ({
+    ...c,
+    mrf: c.mrfId ? mrfs.find((m: any) => m.id === c.mrfId) || null : null,
+  }));
 
   return (
     <div className="space-y-6">
@@ -107,17 +120,17 @@ export default async function ReportsPage() {
           <CardHeader><CardTitle>MRFs by Department</CardTitle></CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {mrfsByDepartment.sort((a, b) => b._count.id - a._count.id).map((row) => (
+              {[...mrfsByDepartment].sort((a: any, b: any) => Number(b.count) - Number(a.count)).map((row: any) => (
                 <div key={row.departmentId} className="flex items-center justify-between">
                   <span className="text-sm text-gray-600">{deptMap[row.departmentId] || "Unknown"}</span>
                   <div className="flex items-center gap-2">
                     <div className="w-24 h-2 rounded-full bg-gray-100">
                       <div
                         className="h-2 rounded-full bg-purple-500"
-                        style={{ width: `${totalMRFs > 0 ? (row._count.id / totalMRFs) * 100 : 0}%` }}
+                        style={{ width: `${totalMRFs > 0 ? (Number(row.count) / totalMRFs) * 100 : 0}%` }}
                       />
                     </div>
-                    <span className="text-sm font-medium w-6 text-right">{row._count.id}</span>
+                    <span className="text-sm font-medium w-6 text-right">{Number(row.count)}</span>
                   </div>
                 </div>
               ))}
@@ -131,17 +144,17 @@ export default async function ReportsPage() {
           <CardHeader><CardTitle>MRFs by Country</CardTitle></CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {mrfsByCountry.sort((a, b) => b._count.id - a._count.id).map((row) => (
+              {[...mrfsByCountry].sort((a: any, b: any) => Number(b.count) - Number(a.count)).map((row: any) => (
                 <div key={row.countryId} className="flex items-center justify-between">
                   <span className="text-sm text-gray-600">{countryMap[row.countryId] || "Unknown"}</span>
                   <div className="flex items-center gap-2">
                     <div className="w-24 h-2 rounded-full bg-gray-100">
                       <div
                         className="h-2 rounded-full bg-green-500"
-                        style={{ width: `${totalMRFs > 0 ? (row._count.id / totalMRFs) * 100 : 0}%` }}
+                        style={{ width: `${totalMRFs > 0 ? (Number(row.count) / totalMRFs) * 100 : 0}%` }}
                       />
                     </div>
-                    <span className="text-sm font-medium w-6 text-right">{row._count.id}</span>
+                    <span className="text-sm font-medium w-6 text-right">{Number(row.count)}</span>
                   </div>
                 </div>
               ))}
@@ -157,7 +170,7 @@ export default async function ReportsPage() {
         <CardContent>
           <div className="flex flex-wrap gap-4">
             {Object.entries(MRF_STATUSES).map(([key, val]) => {
-              const count =
+              const countVal =
                 key === "APPROVED" ? approvedMRFs :
                 key === "REJECTED" ? rejectedMRFs :
                 key === "DRAFT" ? totalMRFs - approvedMRFs - rejectedMRFs - pendingMRFs :
@@ -166,7 +179,7 @@ export default async function ReportsPage() {
               return (
                 <div key={key} className={`flex items-center gap-3 rounded-lg px-4 py-3 ${val.color}`}>
                   <span className="text-sm font-medium">{val.label}</span>
-                  <span className="text-xl font-bold">{Math.round(count)}</span>
+                  <span className="text-xl font-bold">{Math.round(countVal)}</span>
                 </div>
               );
             })}
@@ -189,7 +202,7 @@ export default async function ReportsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {recentCandidates.map((c) => {
+              {recentCandidates.map((c: any) => {
                 const stage = CANDIDATE_STAGES.find((s) => s.key === c.currentStage);
                 return (
                   <TableRow key={c.id}>

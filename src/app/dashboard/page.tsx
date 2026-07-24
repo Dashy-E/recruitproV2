@@ -1,11 +1,18 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClipboardList, Users, CheckCircle, Clock, TrendingUp, FileText } from "lucide-react";
 import { CANDIDATE_STAGES } from "@/lib/utils";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+
+async function count(table: string, where?: Record<string, unknown>) {
+  const query = db(table);
+  if (where) query.where(where);
+  const [row] = await query.count<{ count: string }[]>("* as count");
+  return Number(row.count);
+}
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
@@ -13,24 +20,36 @@ export default async function DashboardPage() {
   const userId = (session?.user as { id?: string })?.id || "";
 
   const [mrfCount, candidateCount, approvedMRFs, pendingMRFs] = await Promise.all([
-    prisma.mRF.count(),
-    prisma.candidate.count(),
-    prisma.mRF.count({ where: { status: "APPROVED" } }),
-    prisma.mRF.count({ where: { status: { in: ["PENDING_DIVISIONAL", "PENDING_FUNCTIONAL", "PENDING_COUNTRY"] } } }),
+    count("RECRUIT_T_MRF"),
+    count("RECRUIT_T_Candidate"),
+    count("RECRUIT_T_MRF", { status: "APPROVED" }),
+    db("RECRUIT_T_MRF")
+      .whereIn("status", ["PENDING_DIVISIONAL", "PENDING_FUNCTIONAL", "PENDING_COUNTRY"])
+      .count<{ count: string }[]>("* as count")
+      .then((r) => Number(r[0].count)),
   ]);
 
-  const recentMRFs = await prisma.mRF.findMany({
-    take: 5,
-    orderBy: { createdAt: "desc" },
-    include: { branch: true, department: true, createdBy: true },
-  });
+  const recentMRFsRaw = await db("RECRUIT_T_MRF").orderBy("createdAt", "desc").limit(5);
+  const branchIds = [...new Set(recentMRFsRaw.map((m: any) => m.branchId).filter(Boolean))];
+  const departmentIds = [...new Set(recentMRFsRaw.map((m: any) => m.departmentId).filter(Boolean))];
+  const createdByIds = [...new Set(recentMRFsRaw.map((m: any) => m.createdById).filter(Boolean))];
+  const [branchesForRecent, departmentsForRecent, creatorsForRecent] = await Promise.all([
+    db("RECRUIT_T_Branch").whereIn("id", branchIds),
+    db("RECRUIT_T_Department").whereIn("id", departmentIds),
+    db("RECRUIT_T_User").whereIn("id", createdByIds),
+  ]);
+  const recentMRFs = recentMRFsRaw.map((m: any) => ({
+    ...m,
+    branch: branchesForRecent.find((b: any) => b.id === m.branchId) || null,
+    department: departmentsForRecent.find((d: any) => d.id === m.departmentId) || null,
+    createdBy: creatorsForRecent.find((u: any) => u.id === m.createdById) || null,
+  }));
 
-  const stageStats = await prisma.candidate.groupBy({
-    by: ["currentStage"],
-    _count: { id: true },
-  });
-
-  const stageMap = Object.fromEntries(stageStats.map((s) => [s.currentStage, s._count.id]));
+  const stageStatsRaw = await db("RECRUIT_T_Candidate")
+    .groupBy("currentStage")
+    .select("currentStage")
+    .count({ count: "*" });
+  const stageMap = Object.fromEntries(stageStatsRaw.map((s: any) => [s.currentStage, Number(s.count)]));
 
   const isCandidateUser = role === "CANDIDATE";
   const isEmployeeUser = role === "EMPLOYEE";
@@ -40,18 +59,33 @@ export default async function DashboardPage() {
   }
 
   if (isCandidateUser) {
-    const candidate = await prisma.candidate.findFirst({
-      where: { userId },
-      include: {
-        mrf: { include: { department: true, branch: true } },
-        stageHistory: { orderBy: { changedAt: "desc" } },
-        employee: true,
-      },
-    });
+    const candidateRow = await db("RECRUIT_T_Candidate").where({ userId }).first();
 
-    const candidateNotifications = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT * FROM Notification WHERE userId = ? ORDER BY createdAt DESC LIMIT 10`, userId
-    );
+    let candidate = null;
+    if (candidateRow) {
+      let mrf = null;
+      if (candidateRow.mrfId) {
+        const mrfRow = await db("RECRUIT_T_MRF").where({ id: candidateRow.mrfId }).first();
+        if (mrfRow) {
+          const [department, branch] = await Promise.all([
+            db("RECRUIT_T_Department").where({ id: mrfRow.departmentId }).first(),
+            mrfRow.branchId ? db("RECRUIT_T_Branch").where({ id: mrfRow.branchId }).first() : null,
+          ]);
+          mrf = { ...mrfRow, department, branch };
+        }
+      }
+      const stageHistory = await db("RECRUIT_T_CandidateStageHistory")
+        .where({ candidateId: candidateRow.id })
+        .orderBy("changedAt", "desc");
+      const employee = await db("RECRUIT_T_Employee").where({ candidateId: candidateRow.id }).first();
+
+      candidate = { ...candidateRow, mrf, stageHistory, employee: employee || null };
+    }
+
+    const candidateNotifications = await db("RECRUIT_T_Notification")
+      .where({ userId })
+      .orderBy("createdAt", "desc")
+      .limit(10);
 
     // If candidate has an employee record, show Employee Portal view
     if (candidate?.employee) {
@@ -274,7 +308,7 @@ export default async function DashboardPage() {
               {recentMRFs.length === 0 && (
                 <p className="text-sm text-gray-500 text-center py-4">No MRFs created yet.</p>
               )}
-              {recentMRFs.map((mrf) => (
+              {recentMRFs.map((mrf: any) => (
                 <Link key={mrf.id} href={`/dashboard/mrfs/${mrf.id}`}>
                   <div className="flex items-center gap-3 rounded-lg border border-gray-100 p-3 hover:bg-gray-50 transition-colors">
                     <div className="flex-1 min-w-0">

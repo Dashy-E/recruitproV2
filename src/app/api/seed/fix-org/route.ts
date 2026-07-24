@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { newId } from "@/lib/id";
 import bcrypt from "bcryptjs";
 
 export async function POST() {
@@ -11,12 +12,13 @@ export async function POST() {
   if (role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const log: string[] = [];
+  const now = new Date();
 
   // 1. Fix Bhubaneswar branch code to BBSR
-  const bbsr = await prisma.branch.findFirst({ where: { name: "Bhubaneswar" } });
+  const bbsr = await db("RECRUIT_T_Branch").where({ name: "Bhubaneswar" }).first();
   if (bbsr) {
     if (bbsr.code !== "BBSR") {
-      await prisma.branch.update({ where: { id: bbsr.id }, data: { code: "BBSR" } });
+      await db("RECRUIT_T_Branch").where({ id: bbsr.id }).update({ code: "BBSR", updatedAt: now });
       log.push(`Updated Bhubaneswar branch code from "${bbsr.code}" to "BBSR"`);
     } else {
       log.push(`Bhubaneswar branch code already "BBSR" — skipped`);
@@ -26,31 +28,29 @@ export async function POST() {
   }
 
   // 2. Ensure Raipur Lab in East Central division under Chhattisgarh state
-  const eastCentral = await prisma.division.findFirst({ where: { name: { contains: "East Central" } } });
+  const eastCentral = await db("RECRUIT_T_Division")
+    .whereRaw('UPPER("name") LIKE UPPER(?)', [`%East Central%`])
+    .first();
   if (eastCentral) {
     // Ensure Chhattisgarh state
-    let chhattisgarh = await prisma.state.findFirst({
-      where: { divisionId: eastCentral.id, name: "Chhattisgarh" },
-    });
+    let chhattisgarh = await db("RECRUIT_T_State")
+      .where({ divisionId: eastCentral.id, name: "Chhattisgarh" })
+      .first();
     if (!chhattisgarh) {
-      chhattisgarh = await prisma.state.create({
-        data: { name: "Chhattisgarh", divisionId: eastCentral.id },
-      });
+      const id = newId();
+      await db("RECRUIT_T_State").insert({ id, name: "Chhattisgarh", divisionId: eastCentral.id, createdAt: now, updatedAt: now });
+      chhattisgarh = { id, name: "Chhattisgarh", divisionId: eastCentral.id };
       log.push("Created state 'Chhattisgarh' in East Central division");
     } else {
       log.push("State 'Chhattisgarh' already exists in East Central division");
     }
 
     // Ensure Raipur Lab branch
-    const raipur = await prisma.branch.findFirst({ where: { code: "RPR-LAB" } });
+    const raipur = await db("RECRUIT_T_Branch").where({ code: "RPR-LAB" }).first();
     if (!raipur) {
-      await prisma.branch.create({
-        data: {
-          name: "Raipur Lab",
-          code: "RPR-LAB",
-          countryId: eastCentral.countryId,
-          stateId: chhattisgarh.id,
-        },
+      await db("RECRUIT_T_Branch").insert({
+        id: newId(), name: "Raipur Lab", code: "RPR-LAB",
+        countryId: eastCentral.countryId, stateId: chhattisgarh.id, createdAt: now, updatedAt: now,
       });
       log.push("Created branch 'Raipur Lab' (RPR-LAB) in Chhattisgarh");
     } else {
@@ -61,17 +61,17 @@ export async function POST() {
   }
 
   // 3. Ensure Central Lab and Udayayan Lab on Corporate country
-  const corporate = await prisma.country.findFirst({ where: { locationType: "CORPORATE" } });
+  const corporate = await db("RECRUIT_T_Country").where({ locationType: "CORPORATE" }).first();
   if (corporate) {
     const labs = [
       { name: "Central Lab", code: "CTRL-LAB" },
       { name: "Udayayan Lab", code: "UDYN-LAB" },
     ];
     for (const lab of labs) {
-      const existing = await prisma.branch.findFirst({ where: { code: lab.code } });
+      const existing = await db("RECRUIT_T_Branch").where({ code: lab.code }).first();
       if (!existing) {
-        await prisma.branch.create({
-          data: { name: lab.name, code: lab.code, countryId: corporate.id },
+        await db("RECRUIT_T_Branch").insert({
+          id: newId(), name: lab.name, code: lab.code, countryId: corporate.id, createdAt: now, updatedAt: now,
         });
         log.push(`Created branch '${lab.name}' (${lab.code}) on Corporate`);
       } else {
@@ -84,26 +84,20 @@ export async function POST() {
 
   // 4. Create demo Employee user if missing
   const empEmail = "employee@recruitpro.com";
-  const existingEmp = await prisma.user.findUnique({ where: { email: empEmail } });
+  const existingEmp = await db("RECRUIT_T_User").where({ email: empEmail }).first();
   if (!existingEmp) {
-    const empUser = await prisma.user.create({
-      data: {
-        name: "Demo Employee",
-        email: empEmail,
-        password: await bcrypt.hash("emp123", 10),
-        role: "EMPLOYEE",
-      },
-    });
-    // Create a linked candidate record so the profile exists
-    await prisma.candidate.create({
-      data: {
-        userId: empUser.id,
-        firstName: "Demo",
-        lastName: "Employee",
-        email: empEmail,
-        currentStage: "JOINED",
-        candidateStatus: "ACTIVE",
-      },
+    const empUserId = newId();
+    await db.transaction(async (trx) => {
+      await trx("RECRUIT_T_User").insert({
+        id: empUserId, name: "Demo Employee", userName: "employee", email: empEmail,
+        password: await bcrypt.hash("emp123", 10), role: "EMPLOYEE", createdAt: now, updatedAt: now,
+      });
+      // Create a linked candidate record so the profile exists
+      await trx("RECRUIT_T_Candidate").insert({
+        id: newId(), userId: empUserId, firstName: "Demo", lastName: "Employee",
+        email: empEmail, currentStage: "JOINED", candidateStatus: "ACTIVE",
+        createdAt: now, updatedAt: now,
+      });
     });
     log.push("Created demo employee user (employee@recruitpro.com / emp123)");
   } else {

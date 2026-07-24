@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 
 export async function GET() {
   try {
-    const stages = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT * FROM WorkflowStage ORDER BY stepOrder ASC`
-    );
+    const stages = await db("RECRUIT_T_WorkflowStage").orderBy("stepOrder", "asc");
     return NextResponse.json(stages);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

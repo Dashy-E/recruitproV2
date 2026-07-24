@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { hasPermission } from "@/lib/permissions";
 
 async function requireAdmin() {
   const session = await getServerSession(authOptions);
   if (!session) return null;
-  const role = (session.user as { role?: string })?.role;
-  if (!["ADMIN", "HR"].includes(role || "")) return null;
+  if (!hasPermission(session, "MANAGE_ORG")) return null;
   return session;
 }
 
@@ -19,17 +19,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json();
   const { name, code, locationType } = body;
 
-  const country = await prisma.country.findUnique({ where: { id } });
+  const country = await db("RECRUIT_T_Country").where({ id }).first();
   if (!country) return NextResponse.json({ error: "Country not found" }, { status: 404 });
 
-  const updated = await prisma.country.update({
-    where: { id },
-    data: {
+  const [updated] = await db("RECRUIT_T_Country")
+    .where({ id })
+    .update({
       ...(name && { name }),
       ...(code && { code: code.toUpperCase() }),
       ...(locationType && { locationType }),
-    },
-  });
+      updatedAt: new Date(),
+    })
+    .returning("*");
 
   return NextResponse.json(updated);
 }
@@ -37,16 +38,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const role = (session.user as { role?: string })?.role;
-  if (role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermission(session, "MANAGE_ORG")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
 
   // Block deletion if any branches, MRFs, or users are linked
   const [branchCount, mrfCount, userCount] = await Promise.all([
-    prisma.branch.count({ where: { countryId: id } }),
-    prisma.mRF.count({ where: { countryId: id } }),
-    prisma.user.count({ where: { countryId: id } }),
+    db("RECRUIT_T_Branch").where({ countryId: id }).count<{ count: string }[]>("* as count").then((r) => Number(r[0].count)),
+    db("RECRUIT_T_MRF").where({ countryId: id }).count<{ count: string }[]>("* as count").then((r) => Number(r[0].count)),
+    db("RECRUIT_T_User").where({ countryId: id }).count<{ count: string }[]>("* as count").then((r) => Number(r[0].count)),
   ]);
 
   if (branchCount + mrfCount + userCount > 0) {
@@ -59,6 +59,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     );
   }
 
-  await prisma.country.delete({ where: { id } });
+  await db("RECRUIT_T_Country").where({ id }).del();
   return NextResponse.json({ success: true });
 }

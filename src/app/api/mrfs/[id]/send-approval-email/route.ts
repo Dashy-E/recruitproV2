@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { newId } from "@/lib/id";
+import { hasPermission } from "@/lib/permissions";
 import nodemailer from "nodemailer";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const role = (session.user as { role?: string })?.role || "";
   const userId = (session.user as { id?: string })?.id!;
-  if (!["ADMIN", "HR", "BRANCH_MANAGER", "DIVISIONAL_MANAGER", "FUNCTIONAL_HEAD", "COUNTRY_MANAGER"].includes(role)) {
+  if (!hasPermission(session, "SEND_MRF_APPROVAL_EMAIL")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -18,18 +19,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { toEmail, message } = await req.json();
   if (!toEmail) return NextResponse.json({ error: "toEmail is required" }, { status: 400 });
 
-  const mrfRows = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT m.*, c.name as countryName, dep.name as deptName, b.name as branchName, div.name as divisionName
-     FROM MRF m
-     LEFT JOIN Country c ON c.id = m.countryId
-     LEFT JOIN Department dep ON dep.id = m.departmentId
-     LEFT JOIN Branch b ON b.id = m.branchId
-     LEFT JOIN Division div ON div.id = m.divisionId
-     WHERE m.id = ?`,
-    id
-  );
-  if (!mrfRows.length) return NextResponse.json({ error: "MRF not found" }, { status: 404 });
-  const mrf = mrfRows[0];
+  const mrf = await db("RECRUIT_T_MRF as m")
+    .leftJoin("RECRUIT_T_Country as c", "c.id", "m.countryId")
+    .leftJoin("RECRUIT_T_Department as dep", "dep.id", "m.departmentId")
+    .leftJoin("RECRUIT_T_Branch as b", "b.id", "m.branchId")
+    .leftJoin("RECRUIT_T_Division as div", "div.id", "m.divisionId")
+    .where("m.id", id)
+    .select(
+      "m.*",
+      "c.name as countryName", "dep.name as deptName", "b.name as branchName", "div.name as divisionName"
+    )
+    .first();
+  if (!mrf) return NextResponse.json({ error: "MRF not found" }, { status: 404 });
 
   const appUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
   const mrfLink = `${appUrl}/dashboard/mrfs/${id}`;
@@ -85,20 +86,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
-  // Record in Email table (mrfId column added in earlier migration)
+  // Record in Email table
   try {
-    const emailId = `email_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const now = new Date().toISOString();
-    await prisma.$queryRawUnsafe(
-      `INSERT INTO Email (id, fromId, toEmail, subject, body, isRead, mrfId, sentAt) VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
-      emailId,
-      userId,
+    await db("RECRUIT_T_Email").insert({
+      id: newId(),
+      fromId: userId,
       toEmail,
-      `Action Required: ${mrf.mrfNumber} — ${mrf.title}`,
-      emailBody,
-      id,
-      now
-    );
+      subject: `Action Required: ${mrf.mrfNumber} — ${mrf.title}`,
+      body: emailBody,
+      isRead: 0,
+      mrfId: id,
+      sentAt: new Date(),
+    });
   } catch (err) {
     console.error("Email record insert failed:", err);
   }

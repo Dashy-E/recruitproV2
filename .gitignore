@@ -9,11 +9,8 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-.claude/
-<<<<<<< HEAD
-=======
-
->>>>>>> 3ae0697fcacc4b6c3dfaa79fc75648c57c21dc59
+.claude/ 
+ 
 # testing
 /coverage
 

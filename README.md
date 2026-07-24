@@ -12,15 +12,18 @@ A full-featured recruitment management system built for enterprise HR workflows.
 | Language | TypeScript 5 |
 | UI | React 19, Tailwind CSS 4, shadcn/ui (Radix UI) |
 | Icons | Lucide React |
-| ORM | Prisma 7 with `@prisma/adapter-libsql` |
-| Database | SQLite (`dev.db`) via libsql |
+| Query Builder | Knex.js with the `oracledb` driver |
+| Database | Oracle Database |
 | Auth | NextAuth v4 — JWT strategy, CredentialsProvider, bcryptjs |
 | File Uploads | Node.js `fs/promises` → `public/uploads/` |
 | Forms | React Hook Form + Zod |
 
 ### Key architectural notes
 
-- **Prisma adapter** — this project uses the LibSQL adapter (`@prisma/adapter-libsql`), not the default `PrismaClient`. The client is instantiated with the adapter in `src/lib/prisma.ts`. Do not replace this with a bare `new PrismaClient()`.
+- **No ORM** — Prisma has no Oracle support, so this project uses the Knex.js query builder directly against Oracle via `node-oracledb` (thin mode — no Oracle Instant Client install required). The Knex singleton lives in `src/lib/db.ts`.
+- **Table naming** — every table is prefixed `RECRUIT_T_` (e.g. `RECRUIT_T_User`, `RECRUIT_T_MRF`). The DDL lives in `oracle/schema.sql`.
+- **No native boolean columns** — Oracle booleans are stored as `NUMBER(1)` with a `CHECK (col IN (0,1))`. Convert at the API boundary with `fromBool()`/`toBool()` from `src/lib/db-bool.ts`.
+- **IDs are generated in application code** — `newId()` in `src/lib/id.ts` (backed by `@paralleldrive/cuid2`) is the only place row IDs are created; there is no DB-side default.
 - **App Router only** — all pages live under `src/app/`. There are no Pages Router files.
 - **Server + Client components** — data-fetching pages are server components; interactive pages are `"use client"` components that fetch via the `/api` routes.
 
@@ -76,7 +79,11 @@ npm install
 Create a `.env` file in the project root:
 
 ```env
-DATABASE_URL="file:./dev.db"
+DB_USER="your-oracle-user"
+DB_PASSWORD="your-oracle-password"
+HOST_NAME="your-oracle-host"
+PORT_NAME="1521"
+SID_NAME="orcl"
 NEXTAUTH_SECRET="your-secret-here"
 NEXTAUTH_URL="http://localhost:3000"
 ```
@@ -89,16 +96,10 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ### 3. Set up the database
 
-Run Prisma migrations to create the SQLite schema:
+Run the DDL in `oracle/schema.sql` once against your Oracle instance (SQL*Plus, SQLcl, or any Oracle client):
 
 ```bash
-npx prisma migrate deploy
-```
-
-Generate the Prisma client:
-
-```bash
-npx prisma generate
+sqlplus your-oracle-user/your-oracle-password@your-oracle-host:1521/orcl @oracle/schema.sql
 ```
 
 ### 4. Seed initial data
@@ -142,7 +143,6 @@ Open [http://localhost:3000](http://localhost:3000). The login page has **Quick 
 npm run build     # production build
 npm run start     # run production build
 npm run lint      # ESLint
-npx prisma studio # visual DB browser at http://localhost:5555
 ```
 
 ---
@@ -171,11 +171,12 @@ src/
     ui/               # shadcn/ui components
   lib/
     auth.ts           # NextAuth config
-    prisma.ts         # Prisma client (LibSQL adapter)
+    db.ts             # Knex client (oracledb driver)
+    id.ts             # newId() — single source of row IDs
+    db-bool.ts        # NUMBER(1) <-> boolean conversion helpers
     utils.ts          # Shared helpers, stage/status constants
-prisma/
-  schema.prisma
-  migrations/
+oracle/
+  schema.sql          # Oracle DDL (RECRUIT_T_* tables)
 public/
   uploads/            # Uploaded candidate documents
 ```
