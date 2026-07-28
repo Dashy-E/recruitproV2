@@ -16,9 +16,7 @@ interface PackageData {
       vacancyCount: number; ctcRange: string | null; location: string | null;
       jobProfile: string | null;
       department: { name: string };
-      branch: { name: string } | null;
-      country: { name: string };
-      division: { name: string } | null;
+      orgUnit: { name: string; path: string } | null;
       createdBy: { name: string };
       approvalRecords: { level: string; approverName: string; status: string; notes: string | null; recordedAt: string }[];
     } | null;
@@ -168,9 +166,7 @@ export default function CandidatePackagePage() {
               <h3 className="font-semibold text-gray-900">{candidate.mrf.title}</h3>
               <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm">
                 <div><span className="text-gray-500">Department:</span> <span className="font-medium">{candidate.mrf.department.name}</span></div>
-                <div><span className="text-gray-500">Country:</span> <span className="font-medium">{candidate.mrf.country.name}</span></div>
-                <div><span className="text-gray-500">Branch:</span> <span className="font-medium">{candidate.mrf.branch?.name || "Country Level"}</span></div>
-                <div><span className="text-gray-500">Division:</span> <span className="font-medium">{candidate.mrf.division?.name || "—"}</span></div>
+                <div><span className="text-gray-500">Org Unit:</span> <span className="font-medium">{candidate.mrf.orgUnit?.path || candidate.mrf.orgUnit?.name || "—"}</span></div>
                 <div><span className="text-gray-500">Vacancies:</span> <span className="font-medium">{candidate.mrf.vacancyCount}</span></div>
                 <div><span className="text-gray-500">CTC Range:</span> <span className="font-medium">{candidate.mrf.ctcRange || "—"}</span></div>
                 <div><span className="text-gray-500">Location:</span> <span className="font-medium">{candidate.mrf.location || "—"}</span></div>

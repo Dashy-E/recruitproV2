@@ -27,77 +27,60 @@ export async function POST() {
         password: await bcrypt.hash("hr123", 10), role: "HR", createdAt: now, updatedAt: now,
       });
 
-      // Create India country
-      const indiaId = newId();
-      await trx("RECRUIT_T_Country").insert({
-        id: indiaId, name: "India", code: "IN", locationType: "INDIA", createdAt: now, updatedAt: now,
-      });
-
-      // Create Overseas countries
-      const overseasCountries = [
-        { name: "Australia", code: "AU" }, { name: "UAE", code: "AE" },
-        { name: "Oman", code: "OM" }, { name: "South Africa", code: "ZA" },
-        { name: "Japan", code: "JP" }, { name: "Indonesia", code: "ID" },
-      ];
-      for (const c of overseasCountries) {
-        await trx("RECRUIT_T_Country").insert({
-          id: newId(), ...c, locationType: "OVERSEAS", createdAt: now, updatedAt: now,
+      // Org structure: a generic self-referencing tree (RECRUIT_T_OrgUnit)
+      // replaces the old fixed Country/Division/State/Branch chain, so an
+      // admin can add/move/rename nodes at runtime without a code change.
+      const orgIds: Record<string, string> = {};
+      async function orgUnit(name: string, parentPath: string | null, sortOrder = 0) {
+        const id = newId();
+        await trx("RECRUIT_T_OrgUnit").insert({
+          id, name, parentId: parentPath ? orgIds[parentPath] : null, sortOrder,
+          createdAt: now, updatedAt: now,
         });
+        const path = parentPath ? `${parentPath}>${name}` : name;
+        orgIds[path] = id;
+        return id;
       }
 
-      // Create Corporate country
-      const corporateId = newId();
-      await trx("RECRUIT_T_Country").insert({
-        id: corporateId, name: "Corporate", code: "CORP", locationType: "CORPORATE", createdAt: now, updatedAt: now,
-      });
+      await orgUnit("Corporate", null, 1);
+      await orgUnit("HO", "Corporate", 1);
+      await orgUnit("CL", "Corporate", 2);
+      await orgUnit("UL", "Corporate", 3);
 
-      // India divisions
-      const swDivisionId = newId();
-      await trx("RECRUIT_T_Division").insert({
-        id: swDivisionId, name: "South West Division", countryId: indiaId, createdAt: now, updatedAt: now,
-      });
-      const ecDivisionId = newId();
-      await trx("RECRUIT_T_Division").insert({
-        id: ecDivisionId, name: "East Central Division", countryId: indiaId, createdAt: now, updatedAt: now,
-      });
+      await orgUnit("India", null, 2);
+      await orgUnit("SW", "India", 1);
+      for (const [i, name] of ["Gandhidham", "Udaypur", "Goa", "Mumbai", "Hosapete", "Chennai"].entries()) {
+        await orgUnit(name, "India>SW", i + 1);
+      }
+      await orgUnit("EC", "India", 2);
+      for (const [i, name] of ["Katni", "West Bengal", "BBSR", "Barbil", "Vizag", "West Odisha (Raipur)", "Gawahati"].entries()) {
+        await orgUnit(name, "India>EC", i + 1);
+      }
 
-      // SW States & Branches
-      const gujaratId = newId();
-      await trx("RECRUIT_T_State").insert({
-        id: gujaratId, name: "Gujarat", divisionId: swDivisionId, createdAt: now, updatedAt: now,
-      });
-      const maharashtraId = newId();
-      await trx("RECRUIT_T_State").insert({
-        id: maharashtraId, name: "Maharashtra", divisionId: swDivisionId, createdAt: now, updatedAt: now,
-      });
+      await orgUnit("PSPL", null, 3);
+      await orgUnit("Gemini", null, 4);
 
-      const gandhidhamBranchId = newId();
-      await trx("RECRUIT_T_Branch").insert({
-        id: gandhidhamBranchId, name: "Gandhidham", code: "GDM", countryId: indiaId, stateId: gujaratId,
-        createdAt: now, updatedAt: now,
-      });
-      await trx("RECRUIT_T_Branch").insert({
-        id: newId(), name: "Mumbai", code: "MUM", countryId: indiaId, stateId: maharashtraId,
-        createdAt: now, updatedAt: now,
-      });
+      await orgUnit("Overseas", null, 5);
+      for (const [i, name] of ["China", "Bangladesh", "Indonesia", "Singapore", "Vietnam", "UAE", "Dubai"].entries()) {
+        await orgUnit(name, "Overseas", i + 1);
+      }
+      await orgUnit("West Africa", "Overseas", 8);
+      for (const [i, name] of ["Morocco", "Gabon", "Oman"].entries()) await orgUnit(name, "Overseas>West Africa", i + 1);
+      await orgUnit("South Africa", "Overseas", 9);
+      for (const [i, name] of ["Richard Bay", "Johannesburg", "Northern Cape"].entries()) await orgUnit(name, "Overseas>South Africa", i + 1);
+      await orgUnit("DRC", "Overseas", 10);
+      await orgUnit("Rosa", "Overseas", 11);
+      for (const [i, name] of ["Tanzania", "Mozambique", "Zambia"].entries()) await orgUnit(name, "Overseas>Rosa", i + 1);
+      await orgUnit("Europe", "Overseas", 12);
+      for (const [i, name] of ["Netherlands", "Turkey"].entries()) await orgUnit(name, "Overseas>Europe", i + 1);
+      await orgUnit("Brazil", "Overseas", 13);
+      for (const [i, name] of ["Bar", "Itjoy"].entries()) await orgUnit(name, "Overseas>Brazil", i + 1);
+      await orgUnit("Chile", "Overseas", 14);
+      await orgUnit("Australia", "Overseas", 15);
+      await orgUnit("Gladstone", "Overseas", 16);
 
-      // EC States
-      const wbId = newId();
-      await trx("RECRUIT_T_State").insert({
-        id: wbId, name: "West Bengal", divisionId: ecDivisionId, createdAt: now, updatedAt: now,
-      });
-      await trx("RECRUIT_T_Branch").insert({
-        id: newId(), name: "Kolkata", code: "KOL", countryId: indiaId, stateId: wbId,
-        createdAt: now, updatedAt: now,
-      });
-
-      // Corporate branches
-      await trx("RECRUIT_T_Branch").insert({
-        id: newId(), name: "Kolkata HO", code: "KOL-HO", countryId: corporateId, createdAt: now, updatedAt: now,
-      });
-      await trx("RECRUIT_T_Branch").insert({
-        id: newId(), name: "Delhi HO", code: "DEL-HO", countryId: corporateId, createdAt: now, updatedAt: now,
-      });
+      const gandhidhamOrgUnitId = orgIds["India>SW>Gandhidham"];
+      const indiaOrgUnitId = orgIds["India"];
 
       // Departments
       const departments = ["Operations", "Finance", "HR", "Engineering", "IT", "Procurement", "Safety", "Marketing"];
@@ -125,15 +108,18 @@ export async function POST() {
       await trx("RECRUIT_T_User").insert({
         id: bmId, name: "Rajesh Kumar", userName: "bm", email: "bm@recruitpro.com",
         password: await bcrypt.hash("bm123", 10), role: "BRANCH_MANAGER",
-        branchId: gandhidhamBranchId, countryId: indiaId, createdAt: now, updatedAt: now,
+        createdAt: now, updatedAt: now,
       });
+      await trx("RECRUIT_T_UserOrgUnit").insert({ id: newId(), userId: bmId, orgUnitId: gandhidhamOrgUnitId, createdAt: now });
 
       // Divisional Manager
+      const dmId = newId();
       await trx("RECRUIT_T_User").insert({
-        id: newId(), name: "Priya Sharma", userName: "dm", email: "dm@recruitpro.com",
+        id: dmId, name: "Priya Sharma", userName: "dm", email: "dm@recruitpro.com",
         password: await bcrypt.hash("dm123", 10), role: "DIVISIONAL_MANAGER",
-        countryId: indiaId, createdAt: now, updatedAt: now,
+        createdAt: now, updatedAt: now,
       });
+      await trx("RECRUIT_T_UserOrgUnit").insert({ id: newId(), userId: dmId, orgUnitId: indiaOrgUnitId, createdAt: now });
 
       // Candidate
       const candidateUserId = newId();
@@ -148,9 +134,7 @@ export async function POST() {
         id: mrfId,
         mrfNumber: "MRF-2026-0001",
         title: "Engineer - Gandhidham Operations",
-        countryId: indiaId,
-        divisionId: swDivisionId,
-        branchId: gandhidhamBranchId,
+        orgUnitId: gandhidhamOrgUnitId,
         departmentId: createdDepts["Operations"],
         vacancyCount: 2,
         justification: "Expansion of operations at Gandhidham branch requires 2 additional engineers.",

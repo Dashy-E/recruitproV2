@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { toBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
+import { getAllOrgUnits, getAncestorPath, getAccessibleOrgUnitIds } from "@/lib/org-access";
 
 const MRF_BOOLEAN_FIELDS = ["isNewRole", "isBusinessExpansion", "isBudgeted", "contributionJustified"];
 
@@ -15,10 +16,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const mrf = await db("RECRUIT_T_MRF").where({ id }).first();
   if (!mrf) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const [country, division, branch, department, designation, createdBy] = await Promise.all([
-    mrf.countryId ? db("RECRUIT_T_Country").where({ id: mrf.countryId }).first() : null,
-    mrf.divisionId ? db("RECRUIT_T_Division").where({ id: mrf.divisionId }).first() : null,
-    mrf.branchId ? db("RECRUIT_T_Branch").where({ id: mrf.branchId }).first() : null,
+  const accessibleIds = await getAccessibleOrgUnitIds((session.user as { orgUnitIds?: string[] })?.orgUnitIds);
+  if (accessibleIds && !accessibleIds.includes(mrf.orgUnitId)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const orgUnits = await getAllOrgUnits();
+  const orgUnitPath = getAncestorPath(mrf.orgUnitId, orgUnits);
+
+  const [department, designation, createdBy] = await Promise.all([
     db("RECRUIT_T_Department").where({ id: mrf.departmentId }).first(),
     mrf.designationId ? db("RECRUIT_T_Designation").where({ id: mrf.designationId }).first() : null,
     db("RECRUIT_T_User").where({ id: mrf.createdById }).select("name", "email").first(),
@@ -70,9 +76,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   return NextResponse.json({
     ...mrf,
-    country,
-    division,
-    branch,
+    orgUnit: orgUnitPath.length ? { id: mrf.orgUnitId, name: orgUnitPath.at(-1)!.name, path: orgUnitPath.map((p) => p.name).join(" / ") } : null,
     department,
     designation,
     createdBy,
@@ -92,6 +96,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const body = await req.json();
+
+  if (body.orgUnitId) {
+    const orgUnit = await db("RECRUIT_T_OrgUnit").where({ id: body.orgUnitId }).first();
+    if (!orgUnit) return NextResponse.json({ error: "Org unit not found" }, { status: 404 });
+
+    const childCount = await db("RECRUIT_T_OrgUnit")
+      .where({ parentId: body.orgUnitId })
+      .count<{ count: string }[]>("* as count")
+      .then((r) => Number(r[0].count));
+    if (childCount > 0) {
+      return NextResponse.json({ error: "Please select a specific location — this org unit has sub-locations under it" }, { status: 400 });
+    }
+  }
 
   const data: Record<string, unknown> = { ...body, updatedAt: new Date() };
   for (const field of MRF_BOOLEAN_FIELDS) {

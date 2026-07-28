@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { hasPermission } from "@/lib/permissions";
+import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 import nodemailer from "nodemailer";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -20,17 +21,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!toEmail) return NextResponse.json({ error: "toEmail is required" }, { status: 400 });
 
   const mrf = await db("RECRUIT_T_MRF as m")
-    .leftJoin("RECRUIT_T_Country as c", "c.id", "m.countryId")
     .leftJoin("RECRUIT_T_Department as dep", "dep.id", "m.departmentId")
-    .leftJoin("RECRUIT_T_Branch as b", "b.id", "m.branchId")
-    .leftJoin("RECRUIT_T_Division as div", "div.id", "m.divisionId")
     .where("m.id", id)
-    .select(
-      "m.*",
-      "c.name as countryName", "dep.name as deptName", "b.name as branchName", "div.name as divisionName"
-    )
+    .select("m.*", "dep.name as deptName")
     .first();
   if (!mrf) return NextResponse.json({ error: "MRF not found" }, { status: 404 });
+
+  const orgUnitPath = getAncestorPath(mrf.orgUnitId, await getAllOrgUnits());
+  const orgUnitLabel = orgUnitPath.map((p) => p.name).join(" / ");
 
   const appUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
   const mrfLink = `${appUrl}/dashboard/mrfs/${id}`;
@@ -49,9 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     `MRF Details:`,
     `  Reference : ${mrf.mrfNumber}`,
     `  Title     : ${mrf.title}`,
-    `  Country   : ${mrf.countryName || "—"}`,
-    mrf.divisionName ? `  Division  : ${mrf.divisionName}` : "",
-    mrf.branchName ? `  Branch    : ${mrf.branchName}` : "",
+    `  Location  : ${orgUnitLabel || "—"}`,
     `  Department: ${mrf.deptName || "—"}`,
     `  Vacancies : ${mrf.vacancyCount}`,
     mrf.ctcRange ? `  CTC Range : ${mrf.ctcRange}` : "",

@@ -9,8 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Loader2, UserCheck, Eye, FileText, ClipboardList } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-
-interface Branch { id: string; name: string; code: string }
+import { OrgUnitPicker, OrgTreeNode } from "@/components/org-unit-picker";
 
 interface Employee {
   id: string;
@@ -30,7 +29,7 @@ interface Employee {
     phone: string | null;
     mrf: { department: { name: string } } | null;
   };
-  branch: { name: string } | null;
+  orgUnit: { name: string; path: string } | null;
 }
 
 interface JoinedCandidate {
@@ -96,7 +95,7 @@ export default function EmployeesPage() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [joinedCandidates, setJoinedCandidates] = useState<JoinedCandidate[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [orgTree, setOrgTree] = useState<OrgTreeNode[]>([]);
   const [form, setForm] = useState({
     candidateId: "",
     joiningDate: "",
@@ -104,7 +103,7 @@ export default function EmployeesPage() {
     designation: "",
     ctc: "",
     reportingTo: "",
-    branchId: "",
+    orgUnitId: "",
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -122,7 +121,7 @@ export default function EmployeesPage() {
 
   useEffect(() => {
     fetchEmployees();
-    fetch("/api/org/branches").then((r) => r.json()).then((d) => setBranches(Array.isArray(d) ? d : []));
+    fetch("/api/org-units/tree").then((r) => r.json()).then((d) => setOrgTree(Array.isArray(d) ? d : []));
   }, []);
 
   const openAddDialog = async () => {
@@ -132,7 +131,7 @@ export default function EmployeesPage() {
       (c) => c.currentStage === "JOINED" && !c.employee
     );
     setJoinedCandidates(joined);
-    setForm({ candidateId: "", joiningDate: "", department: "", designation: "", ctc: "", reportingTo: "", branchId: "" });
+    setForm({ candidateId: "", joiningDate: "", department: "", designation: "", ctc: "", reportingTo: "", orgUnitId: "" });
     setShowAdd(true);
   };
 
@@ -144,7 +143,7 @@ export default function EmployeesPage() {
       body: JSON.stringify({
         ...form,
         ctc: form.ctc ? parseFloat(form.ctc) : null,
-        branchId: form.branchId || null,
+        orgUnitId: form.orgUnitId || null,
       }),
     });
     setSubmitting(false);
@@ -237,7 +236,7 @@ export default function EmployeesPage() {
                     </TableCell>
                     <TableCell>{emp.department || "—"}</TableCell>
                     <TableCell>{emp.designation || "—"}</TableCell>
-                    <TableCell>{emp.branch?.name || "—"}</TableCell>
+                    <TableCell>{emp.orgUnit?.path || emp.orgUnit?.name || "—"}</TableCell>
                     <TableCell className="text-sm text-gray-600">{formatDate(emp.joiningDate)}</TableCell>
                     <TableCell className="text-sm">
                       {emp.ctc != null ? `₹${emp.ctc.toLocaleString("en-IN")}` : "—"}
@@ -309,16 +308,8 @@ export default function EmployeesPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Branch</Label>
-              <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
-                <SelectTrigger><SelectValue placeholder="Select branch (optional)" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">— None —</SelectItem>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>{b.name} ({b.code})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Org Unit (optional)</Label>
+              <OrgUnitPicker nodes={orgTree} mode="single" value={form.orgUnitId} onChange={(v) => setForm({ ...form, orgUnitId: v as string })} />
             </div>
           </div>
           <DialogFooter>

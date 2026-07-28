@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { CANDIDATE_STAGES, MRF_STATUSES, formatDate } from "@/lib/utils";
 import { hasPermission } from "@/lib/permissions";
+import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 import { BarChart3, Users, ClipboardList, CheckCircle } from "lucide-react";
 
 async function count(table: string, where?: Record<string, unknown>) {
@@ -23,7 +24,7 @@ export default async function ReportsPage() {
   const [
     totalMRFs, approvedMRFs, rejectedMRFs, pendingMRFs,
     totalCandidates, onboardedCandidates,
-    candidatesByStage, mrfsByDepartment, mrfsByCountry,
+    candidatesByStage, mrfsByDepartment, mrfsByOrgUnit,
     recentCandidatesRaw,
   ] = await Promise.all([
     count("RECRUIT_T_MRF"),
@@ -37,15 +38,17 @@ export default async function ReportsPage() {
     count("RECRUIT_T_Candidate", { currentStage: "ONBOARDED" }),
     db("RECRUIT_T_Candidate").groupBy("currentStage").select("currentStage").count({ count: "*" }),
     db("RECRUIT_T_MRF").groupBy("departmentId").select("departmentId").count({ count: "*" }),
-    db("RECRUIT_T_MRF").groupBy("countryId").select("countryId").count({ count: "*" }),
+    db("RECRUIT_T_MRF").groupBy("orgUnitId").select("orgUnitId").count({ count: "*" }),
     db("RECRUIT_T_Candidate").orderBy("createdAt", "desc").limit(10),
   ]);
 
   const departments = await db("RECRUIT_T_Department").select("id", "name");
-  const countries = await db("RECRUIT_T_Country").select("id", "name");
+  const orgUnits = await getAllOrgUnits();
 
   const deptMap = Object.fromEntries(departments.map((d: any) => [d.id, d.name]));
-  const countryMap = Object.fromEntries(countries.map((c: any) => [c.id, c.name]));
+  const orgUnitMap = Object.fromEntries(
+    orgUnits.map((u) => [u.id, getAncestorPath(u.id, orgUnits).map((p) => p.name).join(" / ")])
+  );
   const stageMap = Object.fromEntries(candidatesByStage.map((s: any) => [s.currentStage, Number(s.count)]));
 
   const mrfIds = [...new Set(recentCandidatesRaw.map((c: any) => c.mrfId).filter(Boolean))];
@@ -139,14 +142,14 @@ export default async function ReportsPage() {
           </CardContent>
         </Card>
 
-        {/* MRFs by Country */}
+        {/* MRFs by Org Unit */}
         <Card>
-          <CardHeader><CardTitle>MRFs by Country</CardTitle></CardHeader>
+          <CardHeader><CardTitle>MRFs by Org Unit</CardTitle></CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {[...mrfsByCountry].sort((a: any, b: any) => Number(b.count) - Number(a.count)).map((row: any) => (
-                <div key={row.countryId} className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">{countryMap[row.countryId] || "Unknown"}</span>
+              {[...mrfsByOrgUnit].sort((a: any, b: any) => Number(b.count) - Number(a.count)).map((row: any) => (
+                <div key={row.orgUnitId} className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">{orgUnitMap[row.orgUnitId] || "Unknown"}</span>
                   <div className="flex items-center gap-2">
                     <div className="w-24 h-2 rounded-full bg-gray-100">
                       <div
@@ -158,7 +161,7 @@ export default async function ReportsPage() {
                   </div>
                 </div>
               ))}
-              {mrfsByCountry.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No data yet.</p>}
+              {mrfsByOrgUnit.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No data yet.</p>}
             </div>
           </CardContent>
         </Card>

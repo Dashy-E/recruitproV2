@@ -1,12 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, ClipboardList, Users, Bell } from "lucide-react";
+import { Plus, Search, ClipboardList, Users, Bell, Loader2 } from "lucide-react";
 import { formatDate, MRF_STATUSES } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 
@@ -17,8 +18,7 @@ interface MRF {
   status: string;
   vacancyCount: number;
   createdAt: string;
-  country: { name: string };
-  branch: { name: string } | null;
+  orgUnit: { name: string; path: string } | null;
   department: { name: string };
   createdBy: { name: string };
   _count: { candidates: number };
@@ -41,8 +41,10 @@ const LEVEL_TO_STATUS: Record<string, string> = {
   COUNTRY: "PENDING_COUNTRY",
 };
 
-export default function MRFsPage() {
+function MRFsContent() {
   const { data: session } = useSession();
+  const searchParams = useSearchParams();
+  const orgUnitFilter = searchParams.get("orgUnit") || "";
   const permissions = (session?.user as { permissions?: string[] })?.permissions || [];
   const approvalLevel = (session?.user as { approvalLevel?: string | null })?.approvalLevel ?? null;
   const [mrfs, setMrfs] = useState<MRF[]>([]);
@@ -54,17 +56,19 @@ export default function MRFsPage() {
   const pendingForMe = myPendingStatus ? mrfs.filter((m) => m.status === myPendingStatus) : [];
 
   useEffect(() => {
-    fetch("/api/mrfs")
+    setLoading(true);
+    const url = orgUnitFilter ? `/api/mrfs?orgUnit=${orgUnitFilter}` : "/api/mrfs";
+    fetch(url)
       .then((r) => r.json())
       .then((data) => { setMrfs(Array.isArray(data) ? data : []); setLoading(false); });
-  }, []);
+  }, [orgUnitFilter]);
 
   const filtered = mrfs.filter(
     (m) =>
       m.title.toLowerCase().includes(search.toLowerCase()) ||
       m.mrfNumber.toLowerCase().includes(search.toLowerCase()) ||
       m.department.name.toLowerCase().includes(search.toLowerCase()) ||
-      (m.branch?.name || "").toLowerCase().includes(search.toLowerCase())
+      (m.orgUnit?.name || "").toLowerCase().includes(search.toLowerCase())
   );
 
   const MRFRow = ({ mrf }: { mrf: MRF }) => (
@@ -72,8 +76,7 @@ export default function MRFsPage() {
       <TableCell className="font-mono text-xs">{mrf.mrfNumber}</TableCell>
       <TableCell className="font-medium">{mrf.title}</TableCell>
       <TableCell>
-        <p className="text-sm">{mrf.country.name}</p>
-        <p className="text-xs text-gray-500">{mrf.branch?.name || "—"}</p>
+        <p className="text-sm">{mrf.orgUnit?.path || mrf.orgUnit?.name || "—"}</p>
       </TableCell>
       <TableCell>{mrf.department.name}</TableCell>
       <TableCell className="text-center">{mrf.vacancyCount}</TableCell>
@@ -129,7 +132,7 @@ export default function MRFsPage() {
                 <TableRow>
                   <TableHead>MRF Number</TableHead>
                   <TableHead>Title</TableHead>
-                  <TableHead>Country / Branch</TableHead>
+                  <TableHead>Org Unit</TableHead>
                   <TableHead>Department</TableHead>
                   <TableHead>Vacancies</TableHead>
                   <TableHead>Candidates</TableHead>
@@ -191,7 +194,7 @@ export default function MRFsPage() {
                 <TableRow>
                   <TableHead>MRF Number</TableHead>
                   <TableHead>Title</TableHead>
-                  <TableHead>Country / Branch</TableHead>
+                  <TableHead>Org Unit</TableHead>
                   <TableHead>Department</TableHead>
                   <TableHead>Vacancies</TableHead>
                   <TableHead>Candidates</TableHead>
@@ -208,5 +211,13 @@ export default function MRFsPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function MRFsPage() {
+  return (
+    <Suspense fallback={<div className="py-20 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin" /></div>}>
+      <MRFsContent />
+    </Suspense>
   );
 }

@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { fromBool, toBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
+import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 import bcrypt from "bcryptjs";
 
 const CANDIDATE_BOOLEAN_FIELDS = ["isActive"];
@@ -30,23 +31,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (candidate.mrfId) {
     const mrfRow = await db("RECRUIT_T_MRF").where({ id: candidate.mrfId }).first();
     if (mrfRow) {
-      const [department, branch, country, division, designation, createdBy, approvalRecords] = await Promise.all([
+      const [department, designation, createdBy, approvalRecords, orgUnits] = await Promise.all([
         db("RECRUIT_T_Department").where({ id: mrfRow.departmentId }).first(),
-        mrfRow.branchId ? db("RECRUIT_T_Branch").where({ id: mrfRow.branchId }).first() : null,
-        mrfRow.countryId ? db("RECRUIT_T_Country").where({ id: mrfRow.countryId }).select("name").first() : null,
-        mrfRow.divisionId ? db("RECRUIT_T_Division").where({ id: mrfRow.divisionId }).select("name").first() : null,
         mrfRow.designationId
           ? db("RECRUIT_T_Designation").where({ id: mrfRow.designationId }).select("requiresPsychometric").first()
           : null,
         db("RECRUIT_T_User").where({ id: mrfRow.createdById }).select("name").first(),
         db("RECRUIT_T_MRFApprovalRecord").where({ mrfId: mrfRow.id }).orderBy("recordedAt", "asc"),
+        getAllOrgUnits(),
       ]);
+      const orgUnitPath = getAncestorPath(mrfRow.orgUnitId, orgUnits);
       mrf = {
         ...mrfRow,
         department,
-        branch,
-        country,
-        division,
+        orgUnit: orgUnitPath.length ? { id: mrfRow.orgUnitId, name: orgUnitPath.at(-1)!.name, path: orgUnitPath.map((p) => p.name).join(" / ") } : null,
         designation: designation ? { requiresPsychometric: fromBool(designation.requiresPsychometric) } : null,
         createdBy,
         approvalRecords,

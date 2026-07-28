@@ -24,7 +24,7 @@ interface CandidateDetail {
   id: string; firstName: string; lastName: string; email: string; phone: string | null;
   currentStage: string; aiScore: number | null; aiScoreNotes: string | null; resumeUrl: string | null;
   createdAt: string; updatedAt: string;
-  mrf: { id: string; title: string; department: { name: string }; branch: { name: string } | null; designation: { requiresPsychometric: boolean } | null } | null;
+  mrf: { id: string; title: string; department: { name: string }; orgUnit: { name: string; path: string } | null; designation: { requiresPsychometric: boolean } | null } | null;
   stageHistory: { id: string; fromStage: string | null; toStage: string; notes: string | null; changedAt: string }[];
   documents: { id: string; name: string; documentType: string; createdAt: string }[];
 }
@@ -244,7 +244,7 @@ export default function CandidateDetailPage() {
                   <Link href={`/dashboard/mrfs/${candidate.mrf.id}`} className="text-blue-600 hover:underline font-medium">
                     {candidate.mrf.title}
                   </Link>
-                  <p className="text-xs text-gray-500">{candidate.mrf.department.name}{candidate.mrf.branch ? ` · ${candidate.mrf.branch.name}` : ""}</p>
+                  <p className="text-xs text-gray-500">{candidate.mrf.department.name}{candidate.mrf.orgUnit ? ` · ${candidate.mrf.orgUnit.name}` : ""}</p>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Psychometric Required</span>

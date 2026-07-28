@@ -15,6 +15,14 @@ async function loadRolePermissions(roleKey: string): Promise<{ permissions: stri
   };
 }
 
+// Only the raw assigned unit ids are stamped on the token — expansion to
+// descendants happens on demand (see src/lib/org-access.ts) so a change to
+// the org tree's shape doesn't require the user to re-login either.
+async function loadUserOrgUnits(userId: string): Promise<string[]> {
+  const rows = await db("RECRUIT_T_UserOrgUnit").where({ userId }).select("orgUnitId");
+  return rows.map((r: any) => r.orgUnitId);
+}
+
 export const authOptions: NextAuthOptions = {
   // Sliding 30-minute idle timeout: maxAge is how long a token stays valid
   // since it was last refreshed; updateAge is how often real activity is
@@ -65,6 +73,9 @@ export const authOptions: NextAuthOptions = {
         token.permissions = permissions;
         token.approvalLevel = approvalLevel;
       }
+      if (token.id) {
+        token.orgUnitIds = await loadUserOrgUnits(token.id as string);
+      }
       return token;
     },
     async session({ session, token }) {
@@ -73,6 +84,7 @@ export const authOptions: NextAuthOptions = {
         (session.user as { id: string }).id = token.id as string;
         (session.user as { permissions: string[] }).permissions = (token.permissions as string[]) || [];
         (session.user as { approvalLevel: string | null }).approvalLevel = (token.approvalLevel as string | null) ?? null;
+        (session.user as { orgUnitIds: string[] }).orgUnitIds = (token.orgUnitIds as string[]) || [];
       }
       return session;
     },

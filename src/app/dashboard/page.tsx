@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClipboardList, Users, CheckCircle, Clock, TrendingUp, FileText } from "lucide-react";
 import { CANDIDATE_STAGES } from "@/lib/utils";
+import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -30,20 +31,22 @@ export default async function DashboardPage() {
   ]);
 
   const recentMRFsRaw = await db("RECRUIT_T_MRF").orderBy("createdAt", "desc").limit(5);
-  const branchIds = [...new Set(recentMRFsRaw.map((m: any) => m.branchId).filter(Boolean))];
   const departmentIds = [...new Set(recentMRFsRaw.map((m: any) => m.departmentId).filter(Boolean))];
   const createdByIds = [...new Set(recentMRFsRaw.map((m: any) => m.createdById).filter(Boolean))];
-  const [branchesForRecent, departmentsForRecent, creatorsForRecent] = await Promise.all([
-    db("RECRUIT_T_Branch").whereIn("id", branchIds),
+  const [departmentsForRecent, creatorsForRecent, orgUnitsForRecent] = await Promise.all([
     db("RECRUIT_T_Department").whereIn("id", departmentIds),
     db("RECRUIT_T_User").whereIn("id", createdByIds),
+    getAllOrgUnits(),
   ]);
-  const recentMRFs = recentMRFsRaw.map((m: any) => ({
-    ...m,
-    branch: branchesForRecent.find((b: any) => b.id === m.branchId) || null,
-    department: departmentsForRecent.find((d: any) => d.id === m.departmentId) || null,
-    createdBy: creatorsForRecent.find((u: any) => u.id === m.createdById) || null,
-  }));
+  const recentMRFs = recentMRFsRaw.map((m: any) => {
+    const path = getAncestorPath(m.orgUnitId, orgUnitsForRecent);
+    return {
+      ...m,
+      orgUnit: path.length ? { name: path.at(-1)!.name, path: path.map((p) => p.name).join(" / ") } : null,
+      department: departmentsForRecent.find((d: any) => d.id === m.departmentId) || null,
+      createdBy: creatorsForRecent.find((u: any) => u.id === m.createdById) || null,
+    };
+  });
 
   const stageStatsRaw = await db("RECRUIT_T_Candidate")
     .groupBy("currentStage")
@@ -67,11 +70,12 @@ export default async function DashboardPage() {
       if (candidateRow.mrfId) {
         const mrfRow = await db("RECRUIT_T_MRF").where({ id: candidateRow.mrfId }).first();
         if (mrfRow) {
-          const [department, branch] = await Promise.all([
+          const [department, orgUnits] = await Promise.all([
             db("RECRUIT_T_Department").where({ id: mrfRow.departmentId }).first(),
-            mrfRow.branchId ? db("RECRUIT_T_Branch").where({ id: mrfRow.branchId }).first() : null,
+            getAllOrgUnits(),
           ]);
-          mrf = { ...mrfRow, department, branch };
+          const path = getAncestorPath(mrfRow.orgUnitId, orgUnits);
+          mrf = { ...mrfRow, department, orgUnit: path.length ? { name: path.at(-1)!.name, path: path.map((p) => p.name).join(" / ") } : null };
         }
       }
       const stageHistory = await db("RECRUIT_T_CandidateStageHistory")
@@ -160,7 +164,7 @@ export default async function DashboardPage() {
                 <div className="mb-6">
                   <p className="text-sm text-gray-500">Position</p>
                   <p className="font-medium">{candidate.mrf?.title || "—"}</p>
-                  <p className="text-sm text-gray-500 mt-1">{candidate.mrf?.department?.name}{candidate.mrf?.branch ? ` · ${candidate.mrf.branch.name}` : ""}</p>
+                  <p className="text-sm text-gray-500 mt-1">{candidate.mrf?.department?.name}{candidate.mrf?.orgUnit ? ` · ${candidate.mrf.orgUnit.name}` : ""}</p>
                 </div>
                 <div className="space-y-3">
                   {CANDIDATE_STAGES.map((stage) => {
@@ -313,7 +317,7 @@ export default async function DashboardPage() {
                   <div className="flex items-center gap-3 rounded-lg border border-gray-100 p-3 hover:bg-gray-50 transition-colors">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{mrf.title}</p>
-                      <p className="text-xs text-gray-500">{mrf.mrfNumber} · {mrf.department.name}{mrf.branch ? ` · ${mrf.branch.name}` : ""}</p>
+                      <p className="text-xs text-gray-500">{mrf.mrfNumber} · {mrf.department.name}{mrf.orgUnit ? ` · ${mrf.orgUnit.name}` : ""}</p>
                     </div>
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium
                       ${mrf.status === "APPROVED" ? "bg-green-100 text-green-700" :

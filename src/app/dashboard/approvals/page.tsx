@@ -21,9 +21,7 @@ interface MRF {
   status: string;
   vacancyCount: number;
   createdAt: string;
-  country: { name: string };
-  division: { name: string } | null;
-  branch: { name: string } | null;
+  orgUnit: { name: string; path: string } | null;
   department: { name: string };
   designation: { title: string } | null;
   createdBy: { name: string; email: string };
@@ -180,9 +178,7 @@ export default function ApprovalsPage() {
                       <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 flex-wrap">
                         <span className="flex items-center gap-1">
                           <Building2 className="h-3 w-3" />
-                          {mrf.country.name}
-                          {mrf.division ? ` › ${mrf.division.name}` : ""}
-                          {mrf.branch ? ` › ${mrf.branch.name}` : ""}
+                          {mrf.orgUnit?.path || mrf.orgUnit?.name || "—"}
                         </span>
                         <span>{mrf.department.name}{mrf.designation ? ` · ${mrf.designation.title}` : ""}</span>
                         <span className="flex items-center gap-1">

@@ -10,10 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ArrowLeft, Loader2, Send } from "lucide-react";
 import Link from "next/link";
+import { OrgUnitPicker, OrgTreeNode } from "@/components/org-unit-picker";
 
-interface Country { id: string; name: string; locationType: string }
-interface Division { id: string; name: string }
-interface Branch { id: string; name: string; code: string }
 interface Department { id: string; name: string; designations: Designation[] }
 interface Designation { id: string; title: string; requiresPsychometric: boolean }
 
@@ -21,15 +19,11 @@ export default function NewMRFPage() {
   const router = useRouter();
 
   // Org data
-  const [countries, setCountries] = useState<Country[]>([]);
-  const [divisions, setDivisions] = useState<Division[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [orgTree, setOrgTree] = useState<OrgTreeNode[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
 
   // Location selection
-  const [selectedCountry, setSelectedCountry] = useState("");
-  const [selectedDivision, setSelectedDivision] = useState("");
-  const [selectedBranch, setSelectedBranch] = useState("");
+  const [selectedOrgUnit, setSelectedOrgUnit] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedDesignation, setSelectedDesignation] = useState("");
 
@@ -84,43 +78,15 @@ export default function NewMRFPage() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
 
-  const countryObj = countries.find((c) => c.id === selectedCountry);
-  const isIndia = countryObj?.locationType === "INDIA";
-  const isOverseas = countryObj?.locationType === "OVERSEAS";
-  const isCorporate = countryObj?.locationType === "CORPORATE";
-
   const designations = departments.find((d) => d.id === selectedDepartment)?.designations || [];
 
   useEffect(() => {
-    fetch("/api/org/countries").then((r) => r.json()).then((d) => setCountries(Array.isArray(d) ? d : []));
+    fetch("/api/org-units/tree").then((r) => r.json()).then((d) => setOrgTree(Array.isArray(d) ? d : []));
     fetch("/api/org/departments").then((r) => r.json()).then((d) => setDepartments(Array.isArray(d) ? d : []));
   }, []);
 
-  useEffect(() => {
-    if (!selectedCountry) return;
-    setSelectedDivision(""); setSelectedBranch("");
-    setDivisions([]); setBranches([]);
-
-    if (isIndia) {
-      fetch(`/api/org/divisions?countryId=${selectedCountry}`)
-        .then((r) => r.json()).then((d) => setDivisions(Array.isArray(d) ? d : []));
-    } else {
-      // Overseas and Corporate: load branches by countryId
-      fetch(`/api/org/branches?countryId=${selectedCountry}`)
-        .then((r) => r.json()).then((d) => setBranches(Array.isArray(d) ? d : []));
-    }
-  }, [selectedCountry, isIndia]);
-
-  useEffect(() => {
-    if (!selectedDivision) return;
-    setSelectedBranch(""); setBranches([]);
-    fetch(`/api/org/branches?divisionId=${selectedDivision}`)
-      .then((r) => r.json()).then((d) => setBranches(Array.isArray(d) ? d : []));
-  }, [selectedDivision]);
-
   const isValid = () => {
-    if (!title || !selectedCountry || !selectedDepartment) return false;
-    if (isIndia && (!selectedDivision || !selectedBranch)) return false;
+    if (!title || !selectedOrgUnit || !selectedDepartment) return false;
     if (!vacancyType) return false;
     if (!ctcRange.trim()) return false;
     if (!fillerName.trim() || !fillerDesignation.trim()) return false;
@@ -138,10 +104,7 @@ export default function NewMRFPage() {
 
     const payload = {
       title,
-      countryId: selectedCountry,
-      divisionId: selectedDivision || null,
-      branchId: selectedBranch || null,
-      // stateId intentionally omitted — branches are selected directly
+      orgUnitId: selectedOrgUnit,
       departmentId: selectedDepartment,
       designationId: selectedDesignation || null,
       vacancyCount,
@@ -214,10 +177,6 @@ export default function NewMRFPage() {
     }
   };
 
-  const indiaCountries = countries.filter((c) => c.locationType === "INDIA");
-  const overseasCountries = countries.filter((c) => c.locationType === "OVERSEAS");
-  const corporateCountries = countries.filter((c) => c.locationType === "CORPORATE");
-
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
@@ -253,76 +212,14 @@ export default function NewMRFPage() {
         <Card>
           <CardHeader>
             <CardTitle>Section 1 – Location</CardTitle>
-            <p className="text-sm text-gray-500">Select country first — options will filter accordingly</p>
+            <p className="text-sm text-gray-500">Select the org unit this requisition belongs to</p>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Country / Location Type *</Label>
-              <Select onValueChange={(v) => setSelectedCountry(v)}>
-                <SelectTrigger><SelectValue placeholder="Select country" /></SelectTrigger>
-                <SelectContent>
-                  {indiaCountries.length > 0 && (
-                    <>
-                      <SelectItem value="__india_group" disabled className="font-semibold text-gray-500">── India ──</SelectItem>
-                      {indiaCountries.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                    </>
-                  )}
-                  {overseasCountries.length > 0 && (
-                    <>
-                      <SelectItem value="__overseas_group" disabled className="font-semibold text-gray-500">── Overseas ──</SelectItem>
-                      {overseasCountries.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                    </>
-                  )}
-                  {corporateCountries.length > 0 && (
-                    <>
-                      <SelectItem value="__corp_group" disabled className="font-semibold text-gray-500">── Corporate ──</SelectItem>
-                      {corporateCountries.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
+              <Label>Org Unit *</Label>
+              <OrgUnitPicker nodes={orgTree} mode="single" value={selectedOrgUnit} onChange={(v) => setSelectedOrgUnit(v as string)} leafOnly />
+              <p className="text-xs text-gray-500">Only specific locations can be selected — pick the most specific node (a unit with no further sub-locations).</p>
             </div>
-
-            {isIndia && (
-              <>
-                <div className="space-y-2">
-                  <Label>Division *</Label>
-                  <Select onValueChange={setSelectedDivision} disabled={!selectedCountry}>
-                    <SelectTrigger><SelectValue placeholder="Select division" /></SelectTrigger>
-                    <SelectContent>
-                      {divisions.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Branch / Office *</Label>
-                  <Select onValueChange={setSelectedBranch} disabled={!selectedDivision}>
-                    <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                    <SelectContent>
-                      {branches.length === 0
-                        ? <SelectItem value="__none" disabled>Select a division first</SelectItem>
-                        : branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.code})</SelectItem>)
-                      }
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
-            )}
-
-            {(isCorporate || isOverseas) && (
-              <div className="space-y-2">
-                <Label>Branch / Office</Label>
-                <Select onValueChange={setSelectedBranch} disabled={!selectedCountry}>
-                  <SelectTrigger><SelectValue placeholder={branches.length === 0 ? "No branches configured" : "Select branch (optional)"} /></SelectTrigger>
-                  <SelectContent>
-                    {branches.length === 0
-                      ? <SelectItem value="__none" disabled>No branches yet</SelectItem>
-                      : branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.code})</SelectItem>)
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
           </CardContent>
         </Card>
 

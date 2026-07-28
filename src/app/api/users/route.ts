@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { fromBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
+import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 import bcrypt from "bcryptjs";
 
 export async function GET() {
@@ -15,14 +16,14 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const rows = await db("RECRUIT_T_User as u")
-    .leftJoin("RECRUIT_T_Branch as b", "u.branchId", "b.id")
-    .leftJoin("RECRUIT_T_Country as c", "u.countryId", "c.id")
-    .select(
-      "u.id", "u.name", "u.userName", "u.email", "u.role", "u.isActive", "u.createdAt",
-      "b.name as branchName", "c.name as countryName"
-    )
-    .orderBy("u.createdAt", "desc");
+  const rows = await db("RECRUIT_T_User")
+    .select("id", "name", "userName", "email", "role", "isActive", "createdAt")
+    .orderBy("createdAt", "desc");
+
+  const [assignments, orgUnits] = await Promise.all([
+    db("RECRUIT_T_UserOrgUnit").select("userId", "orgUnitId"),
+    getAllOrgUnits(),
+  ]);
 
   const users = rows.map((r: any) => ({
     id: r.id,
@@ -32,8 +33,12 @@ export async function GET() {
     role: r.role,
     isActive: fromBool(r.isActive),
     createdAt: r.createdAt,
-    branch: r.branchName ? { name: r.branchName } : null,
-    country: r.countryName ? { name: r.countryName } : null,
+    orgUnits: assignments
+      .filter((a: any) => a.userId === r.id)
+      .map((a: any) => {
+        const path = getAncestorPath(a.orgUnitId, orgUnits);
+        return { id: a.orgUnitId, name: path.at(-1)?.name ?? a.orgUnitId, path: path.map((p) => p.name).join(" / ") };
+      }),
   }));
 
   return NextResponse.json(users);
@@ -48,7 +53,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { name, userName, email, password, userRole, branchId, countryId, departmentId } = await req.json();
+  const { name, userName, email, password, userRole, departmentId } = await req.json();
 
   // Only ADMIN can create ADMIN users
   if (role !== "ADMIN" && userRole === "ADMIN") {
@@ -77,8 +82,6 @@ export async function POST(req: NextRequest) {
       email,
       password: hashedPassword,
       role: userRole || "HR",
-      branchId: branchId || null,
-      countryId: countryId || null,
       createdAt: now,
       updatedAt: now,
     })
@@ -91,7 +94,7 @@ export async function POST(req: NextRequest) {
   // For FUNCTIONAL_HEAD, auto-create department mapping
   if (userRole === "FUNCTIONAL_HEAD" && departmentId) {
     await db("RECRUIT_T_DepartmentFunctionalHead")
-      .insert({ id: newId(), userId: user.id, departmentId, countryId: countryId || null })
+      .insert({ id: newId(), userId: user.id, departmentId })
       .catch(() => {});
   }
 

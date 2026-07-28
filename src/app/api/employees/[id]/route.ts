@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
+import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -44,10 +45,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .update({ ...body, updatedAt: new Date() })
     .returning("*");
 
-  const [candidate, branch] = await Promise.all([
+  const [candidate, orgUnits] = await Promise.all([
     db("RECRUIT_T_Candidate").where({ id: updated.candidateId }).select("firstName", "lastName", "email").first(),
-    updated.branchId ? db("RECRUIT_T_Branch").where({ id: updated.branchId }).select("name").first() : null,
+    getAllOrgUnits(),
   ]);
+  const orgUnitPath = updated.orgUnitId ? getAncestorPath(updated.orgUnitId, orgUnits) : [];
 
-  return NextResponse.json({ ...updated, candidate: candidate || null, branch: branch || null });
+  return NextResponse.json({
+    ...updated,
+    candidate: candidate || null,
+    orgUnit: orgUnitPath.length ? { id: updated.orgUnitId, name: orgUnitPath.at(-1)!.name, path: orgUnitPath.map((p) => p.name).join(" / ") } : null,
+  });
 }

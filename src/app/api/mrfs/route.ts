@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { toBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
+import { getAllOrgUnits, getAncestorPath, getAccessibleOrgUnitIds, expandDescendantsSync } from "@/lib/org-access";
 
 async function generateMRFNumber(): Promise<string> {
   const year = new Date().getFullYear();
@@ -24,18 +25,13 @@ async function generateMRFNumber(): Promise<string> {
 async function attachRelations(mrfs: any[]) {
   if (!mrfs.length) return [];
   const ids = mrfs.map((m) => m.id);
-  const countryIds = [...new Set(mrfs.map((m) => m.countryId).filter(Boolean))];
-  const divisionIds = [...new Set(mrfs.map((m) => m.divisionId).filter(Boolean))];
-  const branchIds = [...new Set(mrfs.map((m) => m.branchId).filter(Boolean))];
   const departmentIds = [...new Set(mrfs.map((m) => m.departmentId).filter(Boolean))];
   const designationIds = [...new Set(mrfs.map((m) => m.designationId).filter(Boolean))];
   const createdByIds = [...new Set(mrfs.map((m) => m.createdById).filter(Boolean))];
 
-  const [countries, divisions, branches, departments, designations, creators, approvalRecords, candidateCounts] =
+  const [orgUnits, departments, designations, creators, approvalRecords, candidateCounts] =
     await Promise.all([
-      db("RECRUIT_T_Country").whereIn("id", countryIds),
-      db("RECRUIT_T_Division").whereIn("id", divisionIds),
-      db("RECRUIT_T_Branch").whereIn("id", branchIds),
+      getAllOrgUnits(),
       db("RECRUIT_T_Department").whereIn("id", departmentIds),
       db("RECRUIT_T_Designation").whereIn("id", designationIds),
       db("RECRUIT_T_User").whereIn("id", createdByIds).select("id", "name", "email"),
@@ -43,22 +39,23 @@ async function attachRelations(mrfs: any[]) {
       db("RECRUIT_T_Candidate").whereIn("mrfId", ids).groupBy("mrfId").select("mrfId").count({ count: "*" }),
     ]);
 
-  return mrfs.map((m) => ({
-    ...m,
-    country: countries.find((c: any) => c.id === m.countryId) || null,
-    division: divisions.find((d: any) => d.id === m.divisionId) || null,
-    branch: branches.find((b: any) => b.id === m.branchId) || null,
-    department: departments.find((d: any) => d.id === m.departmentId) || null,
-    designation: designations.find((d: any) => d.id === m.designationId) || null,
-    createdBy: (() => {
-      const u = creators.find((c: any) => c.id === m.createdById);
-      return u ? { name: u.name, email: u.email } : null;
-    })(),
-    approvalRecords: approvalRecords.filter((r: any) => r.mrfId === m.id),
-    _count: {
-      candidates: Number(candidateCounts.find((c: any) => c.mrfId === m.id)?.count || 0),
-    },
-  }));
+  return mrfs.map((m) => {
+    const path = getAncestorPath(m.orgUnitId, orgUnits);
+    return {
+      ...m,
+      orgUnit: path.length ? { id: m.orgUnitId, name: path.at(-1)!.name, path: path.map((p) => p.name).join(" / ") } : null,
+      department: departments.find((d: any) => d.id === m.departmentId) || null,
+      designation: designations.find((d: any) => d.id === m.designationId) || null,
+      createdBy: (() => {
+        const u = creators.find((c: any) => c.id === m.createdById);
+        return u ? { name: u.name, email: u.email } : null;
+      })(),
+      approvalRecords: approvalRecords.filter((r: any) => r.mrfId === m.id),
+      _count: {
+        candidates: Number(candidateCounts.find((c: any) => c.mrfId === m.id)?.count || 0),
+      },
+    };
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -67,12 +64,20 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
-  const countryId = searchParams.get("countryId");
+  const orgUnitParam = searchParams.get("orgUnit");
+
+  const accessibleIds = await getAccessibleOrgUnitIds((session.user as { orgUnitIds?: string[] })?.orgUnitIds);
+
+  let allowedIds: string[] | null = accessibleIds;
+  if (orgUnitParam) {
+    const scoped = new Set(expandDescendantsSync([orgUnitParam], await getAllOrgUnits()));
+    allowedIds = accessibleIds ? accessibleIds.filter((id) => scoped.has(id)) : [...scoped];
+  }
 
   const mrfs = await db("RECRUIT_T_MRF")
-    .modify((qb) => {
+    .modify((qb: any) => {
       if (status) qb.where({ status });
-      if (countryId) qb.where({ countryId });
+      if (allowedIds) qb.whereIn("orgUnitId", allowedIds);
     })
     .orderBy("createdAt", "desc");
 
@@ -89,9 +94,9 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { title, countryId, divisionId, branchId, departmentId, designationId, vacancyCount, justification } = body;
+  const { title, orgUnitId, departmentId, designationId, vacancyCount, justification } = body;
 
-  if (!title || !countryId || !departmentId) {
+  if (!title || !orgUnitId || !departmentId) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
   if (!body.ctcRange?.trim()) {
@@ -99,6 +104,24 @@ export async function POST(req: NextRequest) {
   }
   if (!body.fillerName?.trim() || !body.fillerDesignation?.trim()) {
     return NextResponse.json({ error: "Name and designation of person raising MRF are required" }, { status: 400 });
+  }
+
+  const orgUnit = await db("RECRUIT_T_OrgUnit").where({ id: orgUnitId }).first();
+  if (!orgUnit) return NextResponse.json({ error: "Org unit not found" }, { status: 404 });
+
+  // MRFs must target a specific location, not an umbrella node — reject
+  // anything that still has sub-locations underneath it.
+  const childCount = await db("RECRUIT_T_OrgUnit")
+    .where({ parentId: orgUnitId })
+    .count<{ count: string }[]>("* as count")
+    .then((r) => Number(r[0].count));
+  if (childCount > 0) {
+    return NextResponse.json({ error: "Please select a specific location — this org unit has sub-locations under it" }, { status: 400 });
+  }
+
+  const accessibleIds = await getAccessibleOrgUnitIds((session.user as { orgUnitIds?: string[] })?.orgUnitIds);
+  if (accessibleIds && !accessibleIds.includes(orgUnitId)) {
+    return NextResponse.json({ error: "You do not have access to create an MRF under this org unit" }, { status: 403 });
   }
 
   const now = new Date();
@@ -109,9 +132,7 @@ export async function POST(req: NextRequest) {
       id,
       mrfNumber: await generateMRFNumber(),
       title,
-      countryId,
-      divisionId: divisionId || null,
-      branchId,
+      orgUnitId,
       departmentId,
       designationId: designationId || null,
       vacancyCount: vacancyCount || 1,
@@ -149,17 +170,16 @@ export async function POST(req: NextRequest) {
     })
     .returning("*");
 
-  const [country, branch, department, creator] = await Promise.all([
-    db("RECRUIT_T_Country").where({ id: countryId }).first(),
-    db("RECRUIT_T_Branch").where({ id: branchId }).first(),
+  const [department, creator] = await Promise.all([
     db("RECRUIT_T_Department").where({ id: departmentId }).first(),
     db("RECRUIT_T_User").where({ id: userId }).select("name").first(),
   ]);
 
+  const orgUnitPath = getAncestorPath(orgUnitId, await getAllOrgUnits());
+
   const mrfWithRelations = {
     ...mrf,
-    country: country || null,
-    branch: branch || null,
+    orgUnit: { id: orgUnitId, name: orgUnit.name, path: orgUnitPath.map((p) => p.name).join(" / ") },
     department: department || null,
     createdBy: creator ? { name: creator.name } : null,
   };

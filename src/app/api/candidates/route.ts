@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { hasPermission } from "@/lib/permissions";
+import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 import bcrypt from "bcryptjs";
 
 export async function GET(req: NextRequest) {
@@ -38,34 +39,19 @@ export async function GET(req: NextRequest) {
   const [users, mrfs, stageHistory, employees] = await Promise.all([usersQuery, mrfsQuery, stageHistoryQuery, employeesQuery]);
 
   const departmentIds = [...new Set(mrfs.map((m: any) => m.departmentId).filter(Boolean))];
-  const branchIds = [...new Set(mrfs.map((m: any) => m.branchId).filter(Boolean))];
-  const countryIds = [...new Set(mrfs.map((m: any) => m.countryId).filter(Boolean))];
-  const [departments, branches, countries] = await Promise.all([
+  const [departments, orgUnits] = await Promise.all([
     db("RECRUIT_T_Department").whereIn("id", departmentIds),
-    db("RECRUIT_T_Branch").whereIn("id", branchIds),
-    db("RECRUIT_T_Country").whereIn("id", countryIds),
-  ]);
-  const stateIds = [...new Set(branches.map((b: any) => b.stateId).filter(Boolean))];
-  const branchCountryIds = [...new Set(branches.map((b: any) => b.countryId).filter(Boolean))];
-  const [states, branchCountries] = await Promise.all([
-    db("RECRUIT_T_State").whereIn("id", stateIds),
-    db("RECRUIT_T_Country").whereIn("id", branchCountryIds),
+    getAllOrgUnits(),
   ]);
 
-  const mrfsWithRelations = mrfs.map((m: any) => ({
-    ...m,
-    department: departments.find((d: any) => d.id === m.departmentId) || null,
-    branch: (() => {
-      const b = branches.find((x: any) => x.id === m.branchId);
-      if (!b) return null;
-      return {
-        ...b,
-        state: states.find((s: any) => s.id === b.stateId) || null,
-        country: branchCountries.find((c: any) => c.id === b.countryId) || null,
-      };
-    })(),
-    country: countries.find((c: any) => c.id === m.countryId) || null,
-  }));
+  const mrfsWithRelations = mrfs.map((m: any) => {
+    const path = getAncestorPath(m.orgUnitId, orgUnits);
+    return {
+      ...m,
+      department: departments.find((d: any) => d.id === m.departmentId) || null,
+      orgUnit: path.length ? { id: m.orgUnitId, name: path.at(-1)!.name, path: path.map((p) => p.name).join(" / ") } : null,
+    };
+  });
 
   const result = candidates.map((c: any) => ({
     ...c,

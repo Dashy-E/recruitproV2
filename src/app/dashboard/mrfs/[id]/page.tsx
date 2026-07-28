@@ -29,8 +29,8 @@ interface MRFDetail {
   workExperience: string | null; industryBackground: string | null; otherSpecs: string | null;
   contributionJustified: boolean;
   createdAt: string; approvedAt: string | null; rejectedAt: string | null; rejectionReason: string | null;
-  country: { name: string }; division: { name: string } | null;
-  branch: { name: string } | null; department: { name: string };
+  orgUnit: { name: string; path: string } | null;
+  department: { name: string };
   designation: { title: string; requiresPsychometric: boolean } | null;
   createdBy: { name: string; email: string };
   approvalRecords: ApprovalRecord[];
@@ -240,9 +240,7 @@ export default function MRFDetailPage() {
           <CardHeader><CardTitle>MRF Details</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
             {[
-              { label: "Country", value: mrf.country.name },
-              { label: "Division", value: mrf.division?.name || "—" },
-              { label: "Branch / Office", value: mrf.branch?.name || "Country Level" },
+              { label: "Org Unit", value: mrf.orgUnit?.path || mrf.orgUnit?.name || "—" },
               { label: "Department", value: mrf.department.name },
               { label: "Designation", value: mrf.designation?.title || "—" },
               { label: "CTC Range", value: mrf.ctcRange || "—" },

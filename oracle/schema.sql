@@ -18,10 +18,8 @@
 --    @updatedAt is maintained by the query engine on every write, not
 --    by the database. Add a BEFORE UPDATE trigger per table if this
 --    schema will ever be written to outside of Prisma.
--- 5. Two columns are intentionally FK-less because the Prisma schema
---    itself declares no @relation for them: DepartmentFunctionalHead's
---    countryId/stateId are treated as ordinary hint columns and
---    Email.mrfId is likewise a plain column with no relation.
+-- 5. Email.mrfId is intentionally FK-less, matching the original Prisma
+--    schema, which declares no @relation for it.
 -- 6. Prisma has no official Oracle connector — this script is meant to
 --    provision a standalone Oracle instance, not to be pointed at by
 --    Prisma Client directly.
@@ -31,52 +29,35 @@
 -- TABLES
 -- ============================================================================
 
-CREATE TABLE "RECRUIT_T_Country" (
-    "id"           VARCHAR2(30)  NOT NULL,
-    "name"         VARCHAR2(255) NOT NULL,
-    "code"         VARCHAR2(255) NOT NULL,
-    "locationType" VARCHAR2(255) DEFAULT 'OVERSEAS' NOT NULL,
-    "isActive"     NUMBER(1)     DEFAULT 1 NOT NULL,
-    "createdAt"    TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
-    "updatedAt"    TIMESTAMP     NOT NULL,
-    CONSTRAINT "Country_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "Country_isActive_chk" CHECK ("isActive" IN (0,1))
-);
-
-CREATE TABLE "RECRUIT_T_Division" (
+-- Generic self-referencing org tree (Corporate / India / PSPL / Gemini /
+-- Overseas and everything under them), replacing the old fixed-depth
+-- Country -> Division -> State -> Branch chain. Depth is arbitrary — some
+-- branches are 2 levels deep (Overseas > China), others 4 (Overseas > West
+-- Africa > Morocco). Admin manages this tree at runtime; no code change is
+-- needed to add/move/rename a node.
+CREATE TABLE "RECRUIT_T_OrgUnit" (
     "id"        VARCHAR2(30)  NOT NULL,
     "name"      VARCHAR2(255) NOT NULL,
-    "countryId" VARCHAR2(30)  NOT NULL,
+    "parentId"  VARCHAR2(30),
+    "sortOrder" NUMBER(10)    DEFAULT 0 NOT NULL,
     "isActive"  NUMBER(1)     DEFAULT 1 NOT NULL,
     "createdAt" TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     "updatedAt" TIMESTAMP     NOT NULL,
-    CONSTRAINT "Division_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "Division_isActive_chk" CHECK ("isActive" IN (0,1))
+    CONSTRAINT "OrgUnit_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "OrgUnit_isActive_chk" CHECK ("isActive" IN (0,1))
 );
 
-CREATE TABLE "RECRUIT_T_State" (
-    "id"         VARCHAR2(30)  NOT NULL,
-    "name"       VARCHAR2(255) NOT NULL,
-    "divisionId" VARCHAR2(30)  NOT NULL,
-    "isActive"   NUMBER(1)     DEFAULT 1 NOT NULL,
-    "createdAt"  TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
-    "updatedAt"  TIMESTAMP     NOT NULL,
-    CONSTRAINT "State_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "State_isActive_chk" CHECK ("isActive" IN (0,1))
-);
-
-CREATE TABLE "RECRUIT_T_Branch" (
-    "id"         VARCHAR2(30)  NOT NULL,
-    "name"       VARCHAR2(255) NOT NULL,
-    "code"       VARCHAR2(255) NOT NULL,
-    "countryId"  VARCHAR2(30)  NOT NULL,
-    "stateId"    VARCHAR2(30),
-    "divisionId" VARCHAR2(30),
-    "isActive"   NUMBER(1)     DEFAULT 1 NOT NULL,
-    "createdAt"  TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
-    "updatedAt"  TIMESTAMP     NOT NULL,
-    CONSTRAINT "Branch_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "Branch_isActive_chk" CHECK ("isActive" IN (0,1))
+-- Multi-assignment: a user can be tied to one or many nodes anywhere in the
+-- tree; access to a node implies access to everything beneath it (resolved
+-- in application code — see src/lib/org-access.ts — rather than via Oracle
+-- recursive CTEs/CONNECT BY, since the tree is small and this avoids the
+-- Knex+oracledb type-inference issues already hit elsewhere in this schema).
+CREATE TABLE "RECRUIT_T_UserOrgUnit" (
+    "id"        VARCHAR2(30) NOT NULL,
+    "userId"    VARCHAR2(30) NOT NULL,
+    "orgUnitId" VARCHAR2(30) NOT NULL,
+    "createdAt" TIMESTAMP    DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT "UserOrgUnit_pkey" PRIMARY KEY ("id")
 );
 
 CREATE TABLE "RECRUIT_T_Department" (
@@ -93,8 +74,6 @@ CREATE TABLE "RECRUIT_T_DepartmentFunctionalHead" (
     "id"           VARCHAR2(30) NOT NULL,
     "departmentId" VARCHAR2(30) NOT NULL,
     "userId"       VARCHAR2(30) NOT NULL,
-    "countryId"    VARCHAR2(30), -- no FK: no @relation declared in schema.prisma
-    "stateId"      VARCHAR2(30), -- no FK: no @relation declared in schema.prisma
     CONSTRAINT "DepartmentFunctionalHead_pkey" PRIMARY KEY ("id")
 );
 
@@ -149,20 +128,11 @@ CREATE TABLE "RECRUIT_T_User" (
     "email"     VARCHAR2(255) NOT NULL,
     "password"  VARCHAR2(255) NOT NULL,
     "role"      VARCHAR2(50)  DEFAULT 'CANDIDATE' NOT NULL,
-    "branchId"  VARCHAR2(30),
-    "countryId" VARCHAR2(30),
     "isActive"  NUMBER(1)     DEFAULT 1 NOT NULL,
     "createdAt" TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     "updatedAt" TIMESTAMP     NOT NULL,
     CONSTRAINT "User_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "User_isActive_chk" CHECK ("isActive" IN (0,1))
-);
-
-CREATE TABLE "RECRUIT_T_UserCountryAssignment" (
-    "id"        VARCHAR2(30) NOT NULL,
-    "userId"    VARCHAR2(30) NOT NULL,
-    "countryId" VARCHAR2(30) NOT NULL,
-    CONSTRAINT "UserCountryAssignment_pkey" PRIMARY KEY ("id")
 );
 
 -- NextAuth's Account/Session/VerificationToken tables are intentionally
@@ -173,9 +143,7 @@ CREATE TABLE "RECRUIT_T_MRF" (
     "id"                         VARCHAR2(30)  NOT NULL,
     "mrfNumber"                  VARCHAR2(255) NOT NULL,
     "title"                      VARCHAR2(500) NOT NULL,
-    "countryId"                  VARCHAR2(30)  NOT NULL,
-    "divisionId"                 VARCHAR2(30),
-    "branchId"                   VARCHAR2(30),
+    "orgUnitId"                  VARCHAR2(30)  NOT NULL,
     "departmentId"               VARCHAR2(30)  NOT NULL,
     "designationId"              VARCHAR2(30),
     "vacancyCount"               NUMBER(10)    DEFAULT 1 NOT NULL,
@@ -316,7 +284,7 @@ CREATE TABLE "RECRUIT_T_Employee" (
     "designation"    VARCHAR2(255),
     "ctc"            NUMBER,
     "reportingTo"    VARCHAR2(255),
-    "branchId"       VARCHAR2(30),
+    "orgUnitId"      VARCHAR2(30),
     "isActive"       NUMBER(1)     DEFAULT 1 NOT NULL,
     "onboardingStep" NUMBER(10)    DEFAULT 0 NOT NULL,
     "employeeType"   VARCHAR2(50)  DEFAULT 'INDIA' NOT NULL,
@@ -393,17 +361,13 @@ CREATE TABLE "RECRUIT_T_DocumentTemplate" (
 -- UNIQUE INDEXES  (mirrors Prisma's @unique / @@unique)
 -- ============================================================================
 
-CREATE UNIQUE INDEX "Country_name_key" ON "RECRUIT_T_Country"("name");
-CREATE UNIQUE INDEX "Country_code_key" ON "RECRUIT_T_Country"("code");
-CREATE UNIQUE INDEX "Division_name_countryId_key" ON "RECRUIT_T_Division"("name", "countryId");
-CREATE UNIQUE INDEX "State_name_divisionId_key" ON "RECRUIT_T_State"("name", "divisionId");
-CREATE UNIQUE INDEX "Branch_code_key" ON "RECRUIT_T_Branch"("code");
+CREATE UNIQUE INDEX "OrgUnit_parentId_name_key" ON "RECRUIT_T_OrgUnit"("parentId", "name");
+CREATE UNIQUE INDEX "UserOrgUnit_userId_orgUnitId_key" ON "RECRUIT_T_UserOrgUnit"("userId", "orgUnitId");
 CREATE UNIQUE INDEX "Department_name_key" ON "RECRUIT_T_Department"("name");
 CREATE UNIQUE INDEX "DepartmentFunctionalHead_dept_user_key" ON "RECRUIT_T_DepartmentFunctionalHead"("departmentId", "userId");
 CREATE UNIQUE INDEX "Designation_title_key" ON "RECRUIT_T_Designation"("title");
 CREATE UNIQUE INDEX "User_email_key" ON "RECRUIT_T_User"("email");
 CREATE UNIQUE INDEX "User_userName_key" ON "RECRUIT_T_User"("userName");
-CREATE UNIQUE INDEX "UserCountryAssignment_user_country_key" ON "RECRUIT_T_UserCountryAssignment"("userId", "countryId");
 CREATE UNIQUE INDEX "MRF_mrfNumber_key" ON "RECRUIT_T_MRF"("mrfNumber");
 CREATE UNIQUE INDEX "Candidate_userId_key" ON "RECRUIT_T_Candidate"("userId");
 CREATE UNIQUE INDEX "Candidate_email_key" ON "RECRUIT_T_Candidate"("email");
@@ -420,18 +384,13 @@ CREATE UNIQUE INDEX "WorkflowStage_key_key" ON "RECRUIT_T_WorkflowStage"("key");
 -- Oracle has no ON UPDATE action; ON DELETE RESTRICT is simply omitted.
 -- ============================================================================
 
-ALTER TABLE "RECRUIT_T_Division" ADD CONSTRAINT "Division_countryId_fkey"
-    FOREIGN KEY ("countryId") REFERENCES "RECRUIT_T_Country"("id");
+ALTER TABLE "RECRUIT_T_OrgUnit" ADD CONSTRAINT "OrgUnit_parentId_fkey"
+    FOREIGN KEY ("parentId") REFERENCES "RECRUIT_T_OrgUnit"("id");
 
-ALTER TABLE "RECRUIT_T_State" ADD CONSTRAINT "State_divisionId_fkey"
-    FOREIGN KEY ("divisionId") REFERENCES "RECRUIT_T_Division"("id");
-
-ALTER TABLE "RECRUIT_T_Branch" ADD CONSTRAINT "Branch_countryId_fkey"
-    FOREIGN KEY ("countryId") REFERENCES "RECRUIT_T_Country"("id");
-ALTER TABLE "RECRUIT_T_Branch" ADD CONSTRAINT "Branch_stateId_fkey"
-    FOREIGN KEY ("stateId") REFERENCES "RECRUIT_T_State"("id") ON DELETE SET NULL;
-ALTER TABLE "RECRUIT_T_Branch" ADD CONSTRAINT "Branch_divisionId_fkey"
-    FOREIGN KEY ("divisionId") REFERENCES "RECRUIT_T_Division"("id") ON DELETE SET NULL;
+ALTER TABLE "RECRUIT_T_UserOrgUnit" ADD CONSTRAINT "UserOrgUnit_userId_fkey"
+    FOREIGN KEY ("userId") REFERENCES "RECRUIT_T_User"("id") ON DELETE CASCADE;
+ALTER TABLE "RECRUIT_T_UserOrgUnit" ADD CONSTRAINT "UserOrgUnit_orgUnitId_fkey"
+    FOREIGN KEY ("orgUnitId") REFERENCES "RECRUIT_T_OrgUnit"("id") ON DELETE CASCADE;
 
 ALTER TABLE "RECRUIT_T_DepartmentFunctionalHead" ADD CONSTRAINT "DeptFuncHead_departmentId_fkey"
     FOREIGN KEY ("departmentId") REFERENCES "RECRUIT_T_Department"("id");
@@ -441,24 +400,11 @@ ALTER TABLE "RECRUIT_T_DepartmentFunctionalHead" ADD CONSTRAINT "DeptFuncHead_us
 ALTER TABLE "RECRUIT_T_Designation" ADD CONSTRAINT "Designation_departmentId_fkey"
     FOREIGN KEY ("departmentId") REFERENCES "RECRUIT_T_Department"("id");
 
-ALTER TABLE "RECRUIT_T_User" ADD CONSTRAINT "User_branchId_fkey"
-    FOREIGN KEY ("branchId") REFERENCES "RECRUIT_T_Branch"("id") ON DELETE SET NULL;
-ALTER TABLE "RECRUIT_T_User" ADD CONSTRAINT "User_countryId_fkey"
-    FOREIGN KEY ("countryId") REFERENCES "RECRUIT_T_Country"("id") ON DELETE SET NULL;
 ALTER TABLE "RECRUIT_T_User" ADD CONSTRAINT "User_role_fkey"
     FOREIGN KEY ("role") REFERENCES "RECRUIT_T_Role"("key");
 
-ALTER TABLE "RECRUIT_T_UserCountryAssignment" ADD CONSTRAINT "UserCountryAssignment_userId_fkey"
-    FOREIGN KEY ("userId") REFERENCES "RECRUIT_T_User"("id");
-ALTER TABLE "RECRUIT_T_UserCountryAssignment" ADD CONSTRAINT "UserCountryAssignment_countryId_fkey"
-    FOREIGN KEY ("countryId") REFERENCES "RECRUIT_T_Country"("id");
-
-ALTER TABLE "RECRUIT_T_MRF" ADD CONSTRAINT "MRF_countryId_fkey"
-    FOREIGN KEY ("countryId") REFERENCES "RECRUIT_T_Country"("id");
-ALTER TABLE "RECRUIT_T_MRF" ADD CONSTRAINT "MRF_divisionId_fkey"
-    FOREIGN KEY ("divisionId") REFERENCES "RECRUIT_T_Division"("id") ON DELETE SET NULL;
-ALTER TABLE "RECRUIT_T_MRF" ADD CONSTRAINT "MRF_branchId_fkey"
-    FOREIGN KEY ("branchId") REFERENCES "RECRUIT_T_Branch"("id") ON DELETE SET NULL;
+ALTER TABLE "RECRUIT_T_MRF" ADD CONSTRAINT "MRF_orgUnitId_fkey"
+    FOREIGN KEY ("orgUnitId") REFERENCES "RECRUIT_T_OrgUnit"("id");
 ALTER TABLE "RECRUIT_T_MRF" ADD CONSTRAINT "MRF_departmentId_fkey"
     FOREIGN KEY ("departmentId") REFERENCES "RECRUIT_T_Department"("id");
 ALTER TABLE "RECRUIT_T_MRF" ADD CONSTRAINT "MRF_designationId_fkey"
@@ -500,8 +446,8 @@ ALTER TABLE "RECRUIT_T_OfferDetail" ADD CONSTRAINT "OfferDetail_candidateId_fkey
 
 ALTER TABLE "RECRUIT_T_Employee" ADD CONSTRAINT "Employee_candidateId_fkey"
     FOREIGN KEY ("candidateId") REFERENCES "RECRUIT_T_Candidate"("id");
-ALTER TABLE "RECRUIT_T_Employee" ADD CONSTRAINT "Employee_branchId_fkey"
-    FOREIGN KEY ("branchId") REFERENCES "RECRUIT_T_Branch"("id") ON DELETE SET NULL;
+ALTER TABLE "RECRUIT_T_Employee" ADD CONSTRAINT "Employee_orgUnitId_fkey"
+    FOREIGN KEY ("orgUnitId") REFERENCES "RECRUIT_T_OrgUnit"("id") ON DELETE SET NULL;
 
 ALTER TABLE "RECRUIT_T_EmployeeOnboardingData" ADD CONSTRAINT "EmployeeOnboardingData_empId_fkey"
     FOREIGN KEY ("employeeId") REFERENCES "RECRUIT_T_Employee"("id");

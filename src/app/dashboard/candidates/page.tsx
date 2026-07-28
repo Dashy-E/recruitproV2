@@ -21,8 +21,7 @@ interface Candidate {
   mrf: {
     id: string; title: string;
     department: { name: string };
-    branch: { name: string; state: { name: string } | null; country: { name: string } } | null;
-    country: { name: string };
+    orgUnit: { name: string; path: string } | null;
   } | null;
 }
 
@@ -119,10 +118,7 @@ function CandidateRow({ c }: { c: Candidate }) {
             <p className="text-sm font-medium">{c.mrf.title}</p>
             <p className="text-xs text-gray-500">
               {c.mrf.department.name}
-              {c.mrf.branch
-                ? ` · ${c.mrf.branch.name}${c.mrf.branch.state ? `, ${c.mrf.branch.state.name}` : ""}`
-                : ""}
-              {" · "}{c.mrf.country.name}
+              {c.mrf.orgUnit ? ` · ${c.mrf.orgUnit.path || c.mrf.orgUnit.name}` : ""}
             </p>
           </>
         ) : "—"}

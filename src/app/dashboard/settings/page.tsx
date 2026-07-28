@@ -17,13 +17,12 @@ export default async function SettingsPage() {
   const session = await getServerSession(authOptions);
   if (!hasPermission(session, "MANAGE_SETTINGS") && !hasPermission(session, "MANAGE_ROLES")) redirect("/dashboard");
 
-  const [userCount, candidateCount, mrfCount, documentCount, countryCount, branchCount, deptCount] = await Promise.all([
+  const [userCount, candidateCount, mrfCount, documentCount, orgUnitCount, deptCount] = await Promise.all([
     count("RECRUIT_T_User"),
     count("RECRUIT_T_Candidate"),
     count("RECRUIT_T_MRF"),
     count("RECRUIT_T_Document"),
-    count("RECRUIT_T_Country"),
-    count("RECRUIT_T_Branch"),
+    count("RECRUIT_T_OrgUnit"),
     count("RECRUIT_T_Department"),
   ]);
 
@@ -37,8 +36,7 @@ export default async function SettingsPage() {
     { label: "Candidates", value: candidateCount, icon: Users, color: "text-purple-600 bg-purple-50" },
     { label: "MRFs", value: mrfCount, icon: FileText, color: "text-green-600 bg-green-50" },
     { label: "Documents", value: documentCount, icon: FileText, color: "text-orange-600 bg-orange-50" },
-    { label: "Countries", value: countryCount, icon: Globe, color: "text-red-600 bg-red-50" },
-    { label: "Branches", value: branchCount, icon: Building2, color: "text-yellow-600 bg-yellow-50" },
+    { label: "Org Units", value: orgUnitCount, icon: Globe, color: "text-red-600 bg-red-50" },
     { label: "Departments", value: deptCount, icon: Building2, color: "text-gray-600 bg-gray-50" },
   ];
 
@@ -159,10 +157,7 @@ export default async function SettingsPage() {
           <p>
             <strong>Seed database:</strong> POST to <code className="bg-yellow-100 px-1 rounded">/api/seed</code> to create initial data (admin, HR, org structure, sample MRF and candidate).
           </p>
-          <p>
-            <strong>Extend org structure:</strong> POST to <code className="bg-yellow-100 px-1 rounded">/api/seed/extend-org</code> to add missing SW/EC branches without overwriting existing data.
-          </p>
-          <p className="text-xs text-yellow-600">These endpoints are safe to call multiple times — they are idempotent.</p>
+          <p className="text-xs text-yellow-600">This endpoint is safe to call multiple times — it is idempotent.</p>
         </CardContent>
       </Card>
     </div>

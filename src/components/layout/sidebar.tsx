@@ -1,14 +1,64 @@
 "use client";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import {
   LayoutDashboard, FileText, Users, Building2, Globe, Settings,
-  LogOut, ChevronDown, ClipboardList, BarChart3, FolderOpen, UserCheck, Mail, ShieldCheck
+  LogOut, ChevronDown, ChevronRight, ClipboardList, BarChart3, FolderOpen, UserCheck, Mail, ShieldCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { sessionFlags } from "@/lib/session-flags";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { OrgTreeNode } from "@/components/org-unit-picker";
+
+function OrgNavTree({ nodes, depth = 0 }: { nodes: OrgTreeNode[]; depth?: number }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const activeOrgUnit = pathname === "/dashboard/mrfs" ? searchParams.get("orgUnit") : null;
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  return (
+    <ul className={cn("space-y-0.5", depth > 0 && "ml-3")}>
+      {nodes.map((node) => {
+        const hasChildren = node.children.length > 0;
+        const isOpen = expanded.has(node.id);
+        const isActive = activeOrgUnit === node.id;
+        return (
+          <li key={node.id}>
+            <div className="flex items-center">
+              {hasChildren ? (
+                <button
+                  onClick={() =>
+                    setExpanded((prev) => {
+                      const next = new Set(prev);
+                      next.has(node.id) ? next.delete(node.id) : next.add(node.id);
+                      return next;
+                    })
+                  }
+                  className="flex h-6 w-5 shrink-0 items-center justify-center text-gray-500 hover:text-white"
+                >
+                  {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                </button>
+              ) : (
+                <span className="w-5 shrink-0" />
+              )}
+              <Link
+                href={`/dashboard/mrfs?orgUnit=${node.id}`}
+                className={cn(
+                  "block flex-1 truncate rounded-md px-2 py-1 text-sm transition-colors",
+                  isActive ? "bg-blue-600 text-white" : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                )}
+              >
+                {node.name}
+              </Link>
+            </div>
+            {hasChildren && isOpen && <OrgNavTree nodes={node.children} depth={depth + 1} />}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 interface NavContext {
   permissions: string[];
@@ -84,7 +134,7 @@ const navItems: NavItem[] = [
     icon: Building2,
     visible: (ctx) => has(ctx, "MANAGE_ORG"),
     children: [
-      { label: "Countries & Branches", href: "/dashboard/org/countries" },
+      { label: "Org Structure", href: "/dashboard/org/structure" },
       { label: "Departments", href: "/dashboard/org/departments" },
       { label: "Designations", href: "/dashboard/org/designations" },
     ],
@@ -132,10 +182,16 @@ export default function Sidebar() {
   const { data: session } = useSession();
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
   const [pendingUserCount, setPendingUserCount] = useState(0);
+  const [orgTree, setOrgTree] = useState<OrgTreeNode[]>([]);
   const role = (session?.user as { role?: string })?.role || "";
   const permissions = (session?.user as { permissions?: string[] })?.permissions || [];
   const approvalLevel = (session?.user as { approvalLevel?: string | null })?.approvalLevel ?? null;
   const ctx: NavContext = { permissions, approvalLevel, role };
+
+  useEffect(() => {
+    if (!session) return;
+    fetch("/api/org-units/tree").then((r) => r.json()).then((d) => setOrgTree(Array.isArray(d) ? d : []));
+  }, [session]);
 
   useEffect(() => {
     if (!permissions.includes("MANAGE_USERS")) return;
@@ -186,11 +242,36 @@ export default function Sidebar() {
               ? pathname === "/dashboard"
               : pathname === item.href || pathname.startsWith(item.href + "/");
             const hasChildren = item.children && item.children.length > 0;
+            const isMrfsTree = item.label === "MRFs" && orgTree.length > 0;
             const isOpen = openMenus[item.label];
 
             return (
               <li key={item.href}>
-                {hasChildren ? (
+                {isMrfsTree ? (
+                  <>
+                    <div
+                      className={cn(
+                        "flex items-center gap-1 rounded-md pr-1 text-sm transition-colors",
+                        isActive ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                      )}
+                    >
+                      <Link href={item.href} className="flex flex-1 items-center gap-3 px-3 py-2">
+                        <Icon className="h-4 w-4" />
+                        <span className="flex-1 text-left">{item.label}</span>
+                      </Link>
+                      <button onClick={() => toggleMenu(item.label)} className="p-1">
+                        <ChevronDown className={cn("h-4 w-4 transition-transform", isOpen && "rotate-180")} />
+                      </button>
+                    </div>
+                    {isOpen && (
+                      <div className="ml-7 mt-1">
+                        <Suspense fallback={null}>
+                          <OrgNavTree nodes={orgTree} />
+                        </Suspense>
+                      </div>
+                    )}
+                  </>
+                ) : hasChildren ? (
                   <>
                     <button
                       onClick={() => toggleMenu(item.label)}

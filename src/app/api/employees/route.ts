@@ -4,15 +4,15 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { hasPermission } from "@/lib/permissions";
+import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 
 async function attachRelations(employees: any[]) {
   if (!employees.length) return [];
   const candidateIds = employees.map((e) => e.candidateId);
-  const branchIds = [...new Set(employees.map((e) => e.branchId).filter(Boolean))];
 
-  const [candidates, branches] = await Promise.all([
+  const [candidates, orgUnits] = await Promise.all([
     db("RECRUIT_T_Candidate").whereIn("id", candidateIds).select("id", "firstName", "lastName", "email", "phone", "mrfId"),
-    db("RECRUIT_T_Branch").whereIn("id", branchIds).select("id", "name"),
+    getAllOrgUnits(),
   ]);
 
   const mrfIds = [...new Set(candidates.map((c: any) => c.mrfId).filter(Boolean))];
@@ -34,9 +34,10 @@ async function attachRelations(employees: any[]) {
             mrf: mrf ? { ...mrf, department: departments.find((d: any) => d.id === mrf.departmentId) || null } : null,
           }
         : null,
-      branch: (() => {
-        const b = branches.find((x: any) => x.id === e.branchId);
-        return b ? { name: b.name } : null;
+      orgUnit: (() => {
+        if (!e.orgUnitId) return null;
+        const path = getAncestorPath(e.orgUnitId, orgUnits);
+        return path.length ? { id: e.orgUnitId, name: path.at(-1)!.name, path: path.map((p) => p.name).join(" / ") } : null;
       })(),
     };
   });
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!hasPermission(session, "MANAGE_EMPLOYEES")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const { candidateId, joiningDate, department, designation, ctc, reportingTo, branchId } = await req.json();
+  const { candidateId, joiningDate, department, designation, ctc, reportingTo, orgUnitId } = await req.json();
 
   // Generate employee code
   const count = await db("RECRUIT_T_Employee").count<{ count: string }[]>("* as count").then((r) => Number(r[0].count));
@@ -73,16 +74,24 @@ export async function POST(req: NextRequest) {
       designation,
       ctc,
       reportingTo,
-      branchId: branchId || null,
+      orgUnitId: orgUnitId || null,
       createdAt: now,
       updatedAt: now,
     })
     .returning("*");
 
-  const [candidate, branch] = await Promise.all([
+  const [candidate, orgUnits] = await Promise.all([
     db("RECRUIT_T_Candidate").where({ id: candidateId }).select("firstName", "lastName", "email").first(),
-    branchId ? db("RECRUIT_T_Branch").where({ id: branchId }).select("name").first() : null,
+    getAllOrgUnits(),
   ]);
+  const orgUnitPath = orgUnitId ? getAncestorPath(orgUnitId, orgUnits) : [];
 
-  return NextResponse.json({ ...employee, candidate: candidate || null, branch: branch || null }, { status: 201 });
+  return NextResponse.json(
+    {
+      ...employee,
+      candidate: candidate || null,
+      orgUnit: orgUnitPath.length ? { id: orgUnitId, name: orgUnitPath.at(-1)!.name, path: orgUnitPath.map((p) => p.name).join(" / ") } : null,
+    },
+    { status: 201 }
+  );
 }

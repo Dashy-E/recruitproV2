@@ -11,13 +11,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Search, Loader2, UserCheck, Pencil } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { OrgUnitPicker, OrgTreeNode, buildOrgTree } from "@/components/org-unit-picker";
 
 interface User {
   id: string; name: string; userName: string; email: string; role: string; isActive: boolean; createdAt: string;
-  branch: { name: string } | null; country: { name: string } | null;
+  orgUnits: { id: string; name: string; path: string }[];
 }
-interface Branch { id: string; name: string; code: string }
-interface Country { id: string; name: string }
 interface Department { id: string; name: string }
 interface Role { id: string; key: string; label: string; isSystem: boolean; isActive: boolean; approvalLevel: string | null; permissions: string[] }
 
@@ -33,11 +32,11 @@ const ROLE_COLORS: Record<string, string> = {
 const DEFAULT_ROLE_COLOR = "bg-slate-100 text-slate-700";
 
 const ROLE_HINTS: Record<string, string> = {
-  HR: "Assign a country or branch",
-  BRANCH_MANAGER: "Assign a branch (required)",
-  DIVISIONAL_MANAGER: "Assign a country",
-  FUNCTIONAL_HEAD: "Assign a department + country",
-  COUNTRY_MANAGER: "Assign a country",
+  HR: "Assign one or more org units (optional)",
+  BRANCH_MANAGER: "Assign at least one org unit (required)",
+  DIVISIONAL_MANAGER: "Assign one or more org units",
+  FUNCTIONAL_HEAD: "Assign a department, plus org units (optional)",
+  COUNTRY_MANAGER: "Assign one or more org units",
 };
 
 export default function UsersPage() {
@@ -46,8 +45,7 @@ export default function UsersPage() {
 
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
-  const [countries, setCountries] = useState<Country[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [orgTree, setOrgTree] = useState<OrgTreeNode[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -56,12 +54,12 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [form, setForm] = useState({
     name: "", userName: "", email: "", password: "", userRole: "HR",
-    branchId: "", countryId: "", departmentId: "",
+    orgUnitIds: [] as string[], departmentId: "",
   });
 
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({
-    name: "", userName: "", email: "", userRole: "", branchId: "", countryId: "", password: "", confirmPassword: "", isActive: true,
+    name: "", userName: "", email: "", userRole: "", orgUnitIds: [] as string[], password: "", confirmPassword: "", isActive: true,
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState("");
@@ -72,8 +70,7 @@ export default function UsersPage() {
 
   useEffect(() => {
     fetchUsers();
-    fetch("/api/org/countries").then((r) => r.json()).then(setCountries);
-    fetch("/api/org/branches").then((r) => r.json()).then(setBranches);
+    fetch("/api/org-units").then((r) => r.json()).then((flat) => setOrgTree(buildOrgTree(Array.isArray(flat) ? flat : [])));
     fetch("/api/org/departments").then((r) => r.json()).then(setDepartments);
     fetch("/api/roles").then((r) => r.json()).then((d) => setRoles(Array.isArray(d) ? d : []));
   }, []);
@@ -105,20 +102,33 @@ export default function UsersPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
-    setSubmitting(false);
     if (!res.ok) {
+      setSubmitting(false);
       const data = await res.json();
       setError(data.error || "Failed to create user.");
       return;
     }
+    const created = await res.json();
+    if (form.orgUnitIds.length > 0) {
+      await fetch(`/api/users/${created.id}/org-units`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orgUnitIds: form.orgUnitIds }),
+      });
+    }
+    setSubmitting(false);
     setShowAdd(false);
-    setForm({ name: "", userName: "", email: "", password: "", userRole: "HR", branchId: "", countryId: "", departmentId: "" });
+    setForm({ name: "", userName: "", email: "", password: "", userRole: "HR", orgUnitIds: [], departmentId: "" });
     fetchUsers();
   };
 
   const openEdit = (u: User) => {
     setEditUser(u);
-    setEditForm({ name: u.name, userName: u.userName, email: u.email, userRole: u.role, branchId: "", countryId: "", password: "", confirmPassword: "", isActive: u.isActive });
+    setEditForm({
+      name: u.name, userName: u.userName, email: u.email, userRole: u.role,
+      orgUnitIds: u.orgUnits.map((o) => o.id),
+      password: "", confirmPassword: "", isActive: u.isActive,
+    });
     setEditError("");
   };
 
@@ -131,16 +141,21 @@ export default function UsersPage() {
       userName: editForm.userName,
       email: editForm.email,
       userRole: editForm.userRole,
-      branchId: editForm.branchId || undefined,
-      countryId: editForm.countryId || undefined,
       isActive: editForm.isActive,
     };
     if (editForm.password) payload.password = editForm.password;
-    const res = await fetch(`/api/users/${editUser.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const [res] = await Promise.all([
+      fetch(`/api/users/${editUser.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+      fetch(`/api/users/${editUser.id}/org-units`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orgUnitIds: editForm.orgUnitIds }),
+      }),
+    ]);
     setEditSubmitting(false);
     if (!res.ok) {
       const data = await res.json();
@@ -154,7 +169,7 @@ export default function UsersPage() {
   const editPasswordsMatch = editForm.password === editForm.confirmPassword;
 
   const needsDept = form.userRole === "FUNCTIONAL_HEAD";
-  const needsBranch = form.userRole === "BRANCH_MANAGER";
+  const needsOrgUnit = form.userRole === "BRANCH_MANAGER";
 
   return (
     <div className="space-y-6">
@@ -204,7 +219,7 @@ export default function UsersPage() {
                   <TableHead>Username</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead>Branch / Country</TableHead>
+                  <TableHead>Org Units</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Joined</TableHead>
                   <TableHead></TableHead>
@@ -221,8 +236,12 @@ export default function UsersPage() {
                         {roles.find((r) => r.key === u.role)?.label || u.role}
                       </span>
                     </TableCell>
-                    <TableCell className="text-sm text-gray-500">
-                      {u.branch?.name || u.country?.name || "—"}
+                    <TableCell className="text-sm text-gray-500 max-w-[220px]">
+                      {u.orgUnits.length === 0
+                        ? "—"
+                        : u.orgUnits.length <= 2
+                        ? u.orgUnits.map((o) => o.path || o.name).join(", ")
+                        : <span title={u.orgUnits.map((o) => o.path || o.name).join(", ")}>{u.orgUnits[0].name} +{u.orgUnits.length - 1} more</span>}
                     </TableCell>
                     <TableCell>
                       <Badge variant={u.isActive ? "success" : "secondary"}>
@@ -245,9 +264,9 @@ export default function UsersPage() {
 
       {/* Edit User Dialog */}
       <Dialog open={!!editUser} onOpenChange={(open) => { if (!open) setEditUser(null); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit User — {editUser?.name}</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-2">
             <div className="space-y-1">
               <Label>Full Name *</Label>
               <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
@@ -271,55 +290,50 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+
+            <div className="col-span-2 grid grid-cols-2 gap-x-6 border-t pt-4">
               <div className="space-y-1">
-                <Label>Branch <span className="text-gray-400 font-normal">(optional)</span></Label>
-                <Select value={editForm.branchId} onValueChange={(v) => setEditForm({ ...editForm, branchId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Keep current" /></SelectTrigger>
-                  <SelectContent>
-                    {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Country <span className="text-gray-400 font-normal">(optional)</span></Label>
-                <Select value={editForm.countryId} onValueChange={(v) => setEditForm({ ...editForm, countryId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Keep current" /></SelectTrigger>
-                  <SelectContent>
-                    {countries.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="border-t pt-3">
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300"
-                  checked={editForm.isActive}
-                  onChange={(e) => setEditForm({ ...editForm, isActive: e.target.checked })}
+                <Label>Org Units <span className="text-gray-400 font-normal">(one or more)</span></Label>
+                <OrgUnitPicker
+                  nodes={orgTree}
+                  mode="multi"
+                  value={editForm.orgUnitIds}
+                  onChange={(v) => setEditForm({ ...editForm, orgUnitIds: v as string[] })}
+                  className="max-h-48"
                 />
-                Account Active
-                {!editUser?.isActive && !editForm.isActive && (
-                  <span className="text-xs text-yellow-600">(pending activation — check the box and save to activate)</span>
-                )}
-              </label>
-            </div>
-            <div className="border-t pt-3 space-y-3">
-              <p className="text-sm font-medium text-gray-700">Change Password <span className="text-gray-400 font-normal">(leave blank to keep current)</span></p>
-              <div className="space-y-1">
-                <Label>New Password</Label>
-                <Input type="password" autoComplete="new-password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Min. 6 characters" />
               </div>
-              <div className="space-y-1">
-                <Label>Confirm Password</Label>
-                <Input type="password" autoComplete="new-password" value={editForm.confirmPassword} onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })} placeholder="Re-enter new password" />
-                {editForm.confirmPassword && !editPasswordsMatch && (
-                  <p className="text-xs text-red-500">Passwords do not match.</p>
-                )}
+
+              <div className="space-y-3">
+                <div>
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-gray-300"
+                      checked={editForm.isActive}
+                      onChange={(e) => setEditForm({ ...editForm, isActive: e.target.checked })}
+                    />
+                    Account Active
+                  </label>
+                  {!editUser?.isActive && !editForm.isActive && (
+                    <p className="text-xs text-yellow-600 mt-1">(pending activation — check the box and save to activate)</p>
+                  )}
+                </div>
+                <p className="text-sm font-medium text-gray-700">Change Password <span className="text-gray-400 font-normal">(leave blank to keep current)</span></p>
+                <div className="space-y-1">
+                  <Label>New Password</Label>
+                  <Input type="password" autoComplete="new-password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Min. 6 characters" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Confirm Password</Label>
+                  <Input type="password" autoComplete="new-password" value={editForm.confirmPassword} onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })} placeholder="Re-enter new password" />
+                  {editForm.confirmPassword && !editPasswordsMatch && (
+                    <p className="text-xs text-red-500">Passwords do not match.</p>
+                  )}
+                </div>
               </div>
             </div>
-            {editError && <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">{editError}</div>}
+
+            {editError && <div className="col-span-2 rounded-md bg-red-50 p-3 text-sm text-red-600">{editError}</div>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditUser(null)}>Cancel</Button>
@@ -339,28 +353,28 @@ export default function UsersPage() {
 
       {/* Add User Dialog */}
       <Dialog open={showAdd} onOpenChange={(open) => { setShowAdd(open); setError(""); }}>
-        <DialogContent>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Add New User</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-2">
+            <div className="space-y-1">
               <Label>Full Name *</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Ravi Patel" />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label>Username *</Label>
               <Input value={form.userName} onChange={(e) => setForm({ ...form, userName: e.target.value })} placeholder="e.g. rpatel" />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label>Email *</Label>
               <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="ravi@company.com" />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label>Password *</Label>
               <Input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Min 6 characters" />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label>Role *</Label>
-              <Select value={form.userRole} onValueChange={(v) => setForm({ ...form, userRole: v, departmentId: "", branchId: "", countryId: "" })}>
+              <Select value={form.userRole} onValueChange={(v) => setForm({ ...form, userRole: v, departmentId: "", orgUnitIds: [] })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {creatableRoles.map(([key, label]) => (
@@ -374,7 +388,7 @@ export default function UsersPage() {
             </div>
 
             {needsDept && (
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label>Department *</Label>
                 <Select value={form.departmentId} onValueChange={(v) => setForm({ ...form, departmentId: v })}>
                   <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
@@ -385,30 +399,18 @@ export default function UsersPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              {needsBranch && (
-                <div className="space-y-2 col-span-2">
-                  <Label>Branch *</Label>
-                  <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
-                    <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                    <SelectContent>
-                      {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.code})</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <div className="space-y-2 col-span-2">
-                <Label>Country{!needsBranch ? " (optional)" : ""}</Label>
-                <Select value={form.countryId} onValueChange={(v) => setForm({ ...form, countryId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select country" /></SelectTrigger>
-                  <SelectContent>
-                    {countries.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="col-span-2 space-y-1 border-t pt-4">
+              <Label>Org Units{needsOrgUnit ? " *" : " (optional)"}</Label>
+              <OrgUnitPicker
+                nodes={orgTree}
+                mode="multi"
+                value={form.orgUnitIds}
+                onChange={(v) => setForm({ ...form, orgUnitIds: v as string[] })}
+                className="max-h-48"
+              />
             </div>
 
-            {error && <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">{error}</div>}
+            {error && <div className="col-span-2 rounded-md bg-red-50 p-3 text-sm text-red-600">{error}</div>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
@@ -417,7 +419,7 @@ export default function UsersPage() {
               disabled={
                 !form.name || !form.userName || !form.email || !form.password || submitting ||
                 (needsDept && !form.departmentId) ||
-                (needsBranch && !form.branchId)
+                (needsOrgUnit && form.orgUnitIds.length === 0)
               }
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
