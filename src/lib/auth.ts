@@ -16,7 +16,10 @@ async function loadRolePermissions(roleKey: string): Promise<{ permissions: stri
 }
 
 export const authOptions: NextAuthOptions = {
-  session: { strategy: "jwt" },
+  // TEMPORARY: 10-second session lifetime for testing the session-expiry
+  // dialog. Revert to a normal duration (or remove maxAge for NextAuth's
+  // 30-day default) before real use.
+  session: { strategy: "jwt", maxAge: 10 },
   providers: [
     CredentialsProvider({
       name: "credentials",

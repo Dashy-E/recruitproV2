@@ -7,6 +7,7 @@ import {
   LogOut, ChevronDown, ClipboardList, BarChart3, FolderOpen, UserCheck, Mail, ShieldCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { sessionFlags } from "@/lib/session-flags";
 import { useEffect, useState } from "react";
 
 interface NavContext {
@@ -153,6 +154,7 @@ export default function Sidebar() {
   }, [permissions.join(",")]);
 
   const handleSignOut = async () => {
+    sessionFlags.manualSignOut = true;
     await signOut({ redirect: false });
     router.push("/login");
     router.refresh();
