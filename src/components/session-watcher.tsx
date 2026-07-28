@@ -14,6 +14,7 @@ export default function SessionWatcher() {
   const wasAuthenticated = useRef(false);
   const expiredRef = useRef(false);
   const checkingRef = useRef(false);
+  const lastCheckRef = useRef(0);
   const [expired, setExpired] = useState(false);
 
   const showExpired = useCallback(() => {
@@ -46,13 +47,22 @@ export default function SessionWatcher() {
     }
   }, [status, pathname, showExpired]);
 
-  // Don't wait for the next periodic poll — check the instant the user
-  // interacts with the page anywhere, so expiry surfaces immediately.
+  // Check on real user activity rather than waiting for a timer — this is
+  // also what keeps a genuinely-active session alive (getSession() lets
+  // NextAuth roll the token's expiry forward under the hood; see auth.ts).
+  // Throttled since checking on literally every click is unnecessary once
+  // one has run recently.
   useEffect(() => {
     if (pathname === "/login") return;
 
+    const CHECK_THROTTLE_MS = 15_000;
+
     const handleInteraction = async () => {
       if (expiredRef.current || checkingRef.current || !wasAuthenticated.current) return;
+      const now = Date.now();
+      if (now - lastCheckRef.current < CHECK_THROTTLE_MS) return;
+      lastCheckRef.current = now;
+
       checkingRef.current = true;
       try {
         const current = await getSession();

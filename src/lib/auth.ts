@@ -16,10 +16,13 @@ async function loadRolePermissions(roleKey: string): Promise<{ permissions: stri
 }
 
 export const authOptions: NextAuthOptions = {
-  // TEMPORARY: 10-second session lifetime for testing the session-expiry
-  // dialog. Revert to a normal duration (or remove maxAge for NextAuth's
-  // 30-day default) before real use.
-  session: { strategy: "jwt", maxAge: 10 },
+  // Sliding 30-minute idle timeout: maxAge is how long a token stays valid
+  // since it was last refreshed; updateAge is how often real activity is
+  // allowed to refresh it. Since providers.tsx no longer polls on a timer
+  // (only real clicks/window-focus touch the session), the session only
+  // stays alive as long as the user is actually doing something — 30
+  // minutes of no activity and the next check reports it expired.
+  session: { strategy: "jwt", maxAge: 30 * 60, updateAge: 60 },
   providers: [
     CredentialsProvider({
       name: "credentials",
