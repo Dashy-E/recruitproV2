@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Globe, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -140,9 +141,8 @@ export default function LoginPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="password">Password</Label>
-                  <Input
+                  <PasswordInput
                     id="password"
-                    type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
@@ -204,9 +204,8 @@ export default function LoginPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="signupPassword">Password</Label>
-                    <Input
+                    <PasswordInput
                       id="signupPassword"
-                      type="password"
                       value={signupPassword}
                       onChange={(e) => setSignupPassword(e.target.value)}
                       required
@@ -214,9 +213,8 @@ export default function LoginPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="signupConfirm">Confirm Password</Label>
-                    <Input
+                    <PasswordInput
                       id="signupConfirm"
-                      type="password"
                       value={signupConfirm}
                       onChange={(e) => setSignupConfirm(e.target.value)}
                       required

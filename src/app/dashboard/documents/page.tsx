@@ -20,7 +20,7 @@ interface Document {
   createdAt: string;
   uploadedBy: { name: string };
   candidate: { id: string; firstName: string; lastName: string; employee: { id: string } | null } | null;
-  mrf: { mrfNumber: string; title: string } | null;
+  mrf: { referenceNumber: string; mrfNumber: string | null; title: string } | null;
 }
 
 type CandidateGroup = {
@@ -102,7 +102,7 @@ export default function DocumentsPage() {
     const name = doc.candidate
       ? `${doc.candidate.firstName} ${doc.candidate.lastName}`
       : doc.mrf
-      ? `MRF: ${doc.mrf.mrfNumber} — ${doc.mrf.title}`
+      ? `MRF: ${doc.mrf.mrfNumber || doc.mrf.referenceNumber} — ${doc.mrf.title}`
       : "Unlinked Documents";
     if (!groupMap[key]) {
       groupMap[key] = { candidateId: doc.candidate?.id ?? null, candidateName: name, documents: [] };

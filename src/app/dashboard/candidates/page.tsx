@@ -25,7 +25,7 @@ interface Candidate {
   } | null;
 }
 
-interface MRF { id: string; mrfNumber: string; title: string }
+interface MRF { id: string; referenceNumber: string; mrfNumber: string | null; title: string }
 
 const STATUS_BADGE: Record<string, string> = {
   ACTIVE: "",
@@ -481,7 +481,7 @@ function CandidatesContent() {
                 <SelectTrigger><SelectValue placeholder="Select MRF (optional)" /></SelectTrigger>
                 <SelectContent>
                   {mrfs.filter((m) => m).map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.mrfNumber} – {m.title}</SelectItem>
+                    <SelectItem key={m.id} value={m.id}>{m.mrfNumber || m.referenceNumber} – {m.title}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

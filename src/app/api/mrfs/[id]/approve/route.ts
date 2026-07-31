@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { STATUS_TO_APPROVAL_LEVEL, ApprovalLevel } from "@/lib/permissions";
+import { generateMRFNumber } from "@/lib/mrf-number";
 import nodemailer from "nodemailer";
 
 const STATUS_FLOW: Record<string, string> = {
@@ -20,7 +21,7 @@ const LEVEL_LABEL: Record<string, string> = {
   PENDING_COUNTRY: "COUNTRY_MANAGER",
 };
 
-async function sendApprovalEmail(toEmail: string, toName: string, mrfNumber: string, mrfTitle: string) {
+async function sendApprovalEmail(toEmail: string, toName: string, referenceNumber: string, mrfTitle: string) {
   if (!process.env.SMTP_HOST) return;
   try {
     const transport = nodemailer.createTransport({
@@ -32,8 +33,8 @@ async function sendApprovalEmail(toEmail: string, toName: string, mrfNumber: str
     await transport.sendMail({
       from: process.env.SMTP_FROM || "noreply@recruitpro.com",
       to: toEmail,
-      subject: `Action Required: MRF ${mrfNumber} awaiting your approval`,
-      text: `Dear ${toName},\n\nMRF "${mrfTitle}" (${mrfNumber}) has been forwarded for your approval.\n\nPlease log in to review:\n${process.env.NEXTAUTH_URL}/dashboard/approvals\n\nThank you,\nRecruitPro ERP`,
+      subject: `Action Required: MRF ${referenceNumber} awaiting your approval`,
+      text: `Dear ${toName},\n\nMRF "${mrfTitle}" (${referenceNumber}) has been forwarded for your approval.\n\nPlease log in to review:\n${process.env.NEXTAUTH_URL}/dashboard/approvals\n\nThank you,\nRecruitPro ERP`,
     });
   } catch { /* SMTP failure is non-fatal */ }
 }
@@ -94,7 +95,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (action === "approve") {
     const nextStatus = STATUS_FLOW[mrf.status];
-    const approvedAt = nextStatus === "APPROVED" ? now : null;
+    const isFinalApproval = nextStatus === "APPROVED";
+    const approvedAt = isFinalApproval ? now : null;
+    // Reference number is assigned exactly once, right here, the moment the
+    // MRF clears its last approval stage — never at creation.
+    const assignedMrfNumber = isFinalApproval ? await generateMRFNumber() : null;
 
     await db.transaction(async (trx) => {
       await trx("RECRUIT_T_MRFApprovalRecord").insert({
@@ -117,6 +122,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           status: nextStatus,
           updatedAt: now,
           ...(approvedAt ? { approvedAt } : {}),
+          ...(assignedMrfNumber ? { mrfNumber: assignedMrfNumber } : {}),
         });
     });
 
@@ -137,17 +143,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         await Promise.all(recipients.map(async (approver: any) => {
           await createNotification(
             approver.id,
-            `MRF ${mrf.mrfNumber} awaiting your approval`,
+            `MRF ${mrf.referenceNumber} awaiting your approval`,
             `"${mrf.title}" has been approved at ${currentLevel.replace(/_/g, " ")} level and requires your review.`,
             `/dashboard/approvals`
           );
-          await sendApprovalEmail(approver.email, approver.name, mrf.mrfNumber, mrf.title);
+          await sendApprovalEmail(approver.email, approver.name, mrf.referenceNumber, mrf.title);
         }));
       } else {
         await createNotification(
           mrf.createdById,
-          `MRF ${mrf.mrfNumber} approved`,
-          `Your MRF "${mrf.title}" has been fully approved.`,
+          `MRF ${mrf.referenceNumber} approved`,
+          `Your MRF "${mrf.title}" (${mrf.referenceNumber}) has been fully approved and assigned MRF number ${assignedMrfNumber}.`,
           `/dashboard/mrfs/${id}`
         );
       }
@@ -182,7 +188,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Notify MRF creator
     await createNotification(
       mrf.createdById,
-      `MRF ${mrf.mrfNumber} was rejected`,
+      `MRF ${mrf.referenceNumber} was rejected`,
       `"${mrf.title}" was rejected by ${resolvedApproverName}${notes ? `: ${notes}` : "."}`,
       `/dashboard/mrfs/${id}`
     );

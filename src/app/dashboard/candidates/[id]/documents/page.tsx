@@ -43,7 +43,8 @@ interface Candidate {
   createdAt: string;
   mrf: {
     id: string;
-    mrfNumber: string;
+    referenceNumber: string;
+    mrfNumber: string | null;
     title: string;
     department: { name: string };
     branch: { name: string } | null;

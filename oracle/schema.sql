@@ -141,7 +141,14 @@ CREATE TABLE "RECRUIT_T_User" (
 
 CREATE TABLE "RECRUIT_T_MRF" (
     "id"                         VARCHAR2(30)  NOT NULL,
-    "mrfNumber"                  VARCHAR2(255) NOT NULL,
+    -- Two independent sequences: referenceNumber (REF-<year>-<seq>) is
+    -- assigned immediately at creation, so every MRF is identifiable from
+    -- day one. mrfNumber (MRF-<year>-<seq>) is null until the MRF clears
+    -- its final approval stage, assigned there (see approve/route.ts). A
+    -- unique index still allows multiple NULLs in Oracle, so many pending
+    -- MRFs can coexist unnumbered.
+    "referenceNumber"            VARCHAR2(255) NOT NULL,
+    "mrfNumber"                  VARCHAR2(255),
     "title"                      VARCHAR2(500) NOT NULL,
     "orgUnitId"                  VARCHAR2(30)  NOT NULL,
     "departmentId"               VARCHAR2(30)  NOT NULL,
@@ -368,6 +375,7 @@ CREATE UNIQUE INDEX "DepartmentFunctionalHead_dept_user_key" ON "RECRUIT_T_Depar
 CREATE UNIQUE INDEX "Designation_title_key" ON "RECRUIT_T_Designation"("title");
 CREATE UNIQUE INDEX "User_email_key" ON "RECRUIT_T_User"("email");
 CREATE UNIQUE INDEX "User_userName_key" ON "RECRUIT_T_User"("userName");
+CREATE UNIQUE INDEX "MRF_referenceNumber_key" ON "RECRUIT_T_MRF"("referenceNumber");
 CREATE UNIQUE INDEX "MRF_mrfNumber_key" ON "RECRUIT_T_MRF"("mrfNumber");
 CREATE UNIQUE INDEX "Candidate_userId_key" ON "RECRUIT_T_Candidate"("userId");
 CREATE UNIQUE INDEX "Candidate_email_key" ON "RECRUIT_T_Candidate"("email");

@@ -13,7 +13,8 @@ import { useSession } from "next-auth/react";
 
 interface MRF {
   id: string;
-  mrfNumber: string;
+  referenceNumber: string;
+  mrfNumber: string | null;
   title: string;
   status: string;
   vacancyCount: number;
@@ -66,14 +67,15 @@ function MRFsContent() {
   const filtered = mrfs.filter(
     (m) =>
       m.title.toLowerCase().includes(search.toLowerCase()) ||
-      m.mrfNumber.toLowerCase().includes(search.toLowerCase()) ||
+      (m.mrfNumber || "").toLowerCase().includes(search.toLowerCase()) ||
+      m.referenceNumber.toLowerCase().includes(search.toLowerCase()) ||
       m.department.name.toLowerCase().includes(search.toLowerCase()) ||
       (m.orgUnit?.name || "").toLowerCase().includes(search.toLowerCase())
   );
 
   const MRFRow = ({ mrf }: { mrf: MRF }) => (
     <TableRow>
-      <TableCell className="font-mono text-xs">{mrf.mrfNumber}</TableCell>
+      <TableCell className="font-mono text-xs">{mrf.mrfNumber || mrf.referenceNumber}</TableCell>
       <TableCell className="font-medium">{mrf.title}</TableCell>
       <TableCell>
         <p className="text-sm">{mrf.orgUnit?.path || mrf.orgUnit?.name || "—"}</p>

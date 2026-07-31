@@ -12,7 +12,7 @@ interface PackageData {
     currentStage: string; aiScore: number | null; aiScoreNotes: string | null;
     resumeUrl: string | null; createdAt: string; candidateStatus: string;
     mrf: {
-      id: string; mrfNumber: string; title: string; status: string;
+      id: string; referenceNumber: string; mrfNumber: string | null; title: string; status: string;
       vacancyCount: number; ctcRange: string | null; location: string | null;
       jobProfile: string | null;
       department: { name: string };
@@ -158,7 +158,7 @@ export default function CandidatePackagePage() {
           ) : (
             <div className="rounded-lg border border-gray-200 p-4 space-y-3">
               <div className="flex items-center gap-3">
-                <span className="font-mono text-sm text-gray-600">{candidate.mrf.mrfNumber}</span>
+                <span className="font-mono text-sm text-gray-600">{candidate.mrf.mrfNumber || candidate.mrf.referenceNumber}</span>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${MRF_STATUSES[candidate.mrf.status as keyof typeof MRF_STATUSES]?.color || "bg-gray-100"}`}>
                   {MRF_STATUSES[candidate.mrf.status as keyof typeof MRF_STATUSES]?.label || candidate.mrf.status}
                 </span>

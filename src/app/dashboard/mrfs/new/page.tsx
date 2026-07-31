@@ -151,7 +151,7 @@ export default function NewMRFPage() {
     if (res.ok) {
       const mrf = await res.json();
       setCreatedMrfId(mrf.id);
-      setCreatedMrfNumber(mrf.mrfNumber || "");
+      setCreatedMrfNumber(mrf.referenceNumber || "");
       setSendModalOpen(true);
     } else {
       const data = await res.json();
@@ -509,7 +509,11 @@ export default function NewMRFPage() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="rounded-md bg-green-50 border border-green-200 p-3 text-sm text-green-800">
-              MRF <span className="font-mono font-semibold">{createdMrfNumber}</span> has been created successfully.
+              {createdMrfNumber ? (
+                <>MRF <span className="font-mono font-semibold">{createdMrfNumber}</span> has been created successfully.</>
+              ) : (
+                <>The MRF has been created successfully — a reference number will be assigned once it clears final approval.</>
+              )}{" "}
               Send it to the first approver now.
             </div>
             <div className="space-y-2">

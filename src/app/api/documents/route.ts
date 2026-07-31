@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
   const [uploaders, candidates, mrfs] = await Promise.all([
     db("RECRUIT_T_User").whereIn("id", uploaderIds).select("id", "name"),
     db("RECRUIT_T_Candidate").whereIn("id", candidateIds).select("id", "firstName", "lastName"),
-    db("RECRUIT_T_MRF").whereIn("id", mrfIds).select("id", "mrfNumber", "title"),
+    db("RECRUIT_T_MRF").whereIn("id", mrfIds).select("id", "referenceNumber", "mrfNumber", "title"),
   ]);
 
   const employees = candidateIds.length
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
     })(),
     mrf: (() => {
       const m = mrfs.find((x: any) => x.id === d.mrfId);
-      return m ? { mrfNumber: m.mrfNumber, title: m.title } : null;
+      return m ? { referenceNumber: m.referenceNumber, mrfNumber: m.mrfNumber, title: m.title } : null;
     })(),
   }));
 

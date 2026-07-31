@@ -6,21 +6,7 @@ import { newId } from "@/lib/id";
 import { toBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath, getAccessibleOrgUnitIds, expandDescendantsSync } from "@/lib/org-access";
-
-async function generateMRFNumber(): Promise<string> {
-  const year = new Date().getFullYear();
-  const prefix = `MRF-${year}-`;
-  const lastMrf = await db("RECRUIT_T_MRF")
-    .whereRaw('"mrfNumber" LIKE ?', [`${prefix}%`])
-    .orderBy("mrfNumber", "desc")
-    .first();
-  let seq = 1;
-  if (lastMrf) {
-    const n = parseInt(lastMrf.mrfNumber.slice(prefix.length), 10);
-    if (!isNaN(n)) seq = n + 1;
-  }
-  return `${prefix}${seq.toString().padStart(4, "0")}`;
-}
+import { generateReferenceNumber } from "@/lib/mrf-number";
 
 async function attachRelations(mrfs: any[]) {
   if (!mrfs.length) return [];
@@ -130,7 +116,10 @@ export async function POST(req: NextRequest) {
   const [mrf] = await db("RECRUIT_T_MRF")
     .insert({
       id,
-      mrfNumber: await generateMRFNumber(),
+      // referenceNumber identifies the MRF from creation onward; mrfNumber
+      // is a separate sequence assigned only once this MRF clears final
+      // approval (see approve/route.ts).
+      referenceNumber: await generateReferenceNumber(),
       title,
       orgUnitId,
       departmentId,
@@ -194,7 +183,7 @@ export async function POST(req: NextRequest) {
         id: newId(),
         userId: mgr.id,
         type: "MRF_APPROVAL",
-        title: `New MRF ${mrf.mrfNumber} requires your approval`,
+        title: `New MRF ${mrf.referenceNumber} requires your approval`,
         message: `"${mrf.title}" has been submitted and is awaiting divisional approval.`,
         link: `/dashboard/approvals`,
         createdAt: now,

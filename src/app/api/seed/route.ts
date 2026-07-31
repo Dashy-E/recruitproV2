@@ -128,11 +128,13 @@ export async function POST() {
         password: await bcrypt.hash("candidate123", 10), role: "CANDIDATE", createdAt: now, updatedAt: now,
       });
 
-      // Sample MRF
+      // Sample MRF — referenceNumber is assigned right away; mrfNumber stays
+      // null since it's PENDING_DIVISIONAL (not approved) and that sequence
+      // is only assigned on final approval.
       const mrfId = newId();
       await trx("RECRUIT_T_MRF").insert({
         id: mrfId,
-        mrfNumber: "MRF-2026-0001",
+        referenceNumber: "REF-2026-0001",
         title: "Engineer - Gandhidham Operations",
         orgUnitId: gandhidhamOrgUnitId,
         departmentId: createdDepts["Operations"],

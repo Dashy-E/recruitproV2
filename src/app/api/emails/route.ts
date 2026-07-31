@@ -15,12 +15,12 @@ export async function GET() {
     .leftJoin("RECRUIT_T_MRF as m", "m.id", "e.mrfId")
     .where("e.fromId", userId)
     .orderBy("e.sentAt", "desc")
-    .select("e.*", "m.id as mrf_id", "m.mrfNumber", "m.title as mrf_title");
+    .select("e.*", "m.id as mrf_id", "m.referenceNumber as mrf_referenceNumber", "m.mrfNumber", "m.title as mrf_title");
 
   // Reshape mrf sub-object for client
   const shaped = emails.map((e: any) => ({
     ...e,
-    mrf: e.mrf_id ? { id: e.mrf_id, mrfNumber: e.mrfNumber, title: e.mrf_title } : null,
+    mrf: e.mrf_id ? { id: e.mrf_id, referenceNumber: e.mrf_referenceNumber, mrfNumber: e.mrfNumber, title: e.mrf_title } : null,
   }));
   return NextResponse.json(shaped);
 }

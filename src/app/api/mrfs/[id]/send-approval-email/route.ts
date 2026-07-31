@@ -42,10 +42,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   };
   const statusLabel = statusLabels[mrf.status] || mrf.status;
 
+  const subjectLine = `Action Required: ${mrf.mrfNumber || mrf.referenceNumber} — ${mrf.title}`;
+
   const emailBody = [
     message ? `${message}\n` : "",
     `MRF Details:`,
-    `  Reference : ${mrf.mrfNumber}`,
+    `  Reference : ${mrf.referenceNumber}`,
+    mrf.mrfNumber ? `  MRF No.   : ${mrf.mrfNumber}` : "",
     `  Title     : ${mrf.title}`,
     `  Location  : ${orgUnitLabel || "—"}`,
     `  Department: ${mrf.deptName || "—"}`,
@@ -74,7 +77,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       await transporter.sendMail({
         from: process.env.SMTP_FROM || "noreply@recruitpro.com",
         to: toEmail,
-        subject: `Action Required: ${mrf.mrfNumber} — ${mrf.title}`,
+        subject: subjectLine,
         text: emailBody,
       });
     } catch (err) {
@@ -88,7 +91,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       id: newId(),
       fromId: userId,
       toEmail,
-      subject: `Action Required: ${mrf.mrfNumber} — ${mrf.title}`,
+      subject: subjectLine,
       body: emailBody,
       isRead: 0,
       mrfId: id,

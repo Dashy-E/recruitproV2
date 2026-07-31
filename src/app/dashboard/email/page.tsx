@@ -12,7 +12,8 @@ import { formatDate } from "@/lib/utils";
 
 interface MRFOption {
   id: string;
-  mrfNumber: string;
+  referenceNumber: string;
+  mrfNumber: string | null;
   title: string;
   status: string;
 }
@@ -24,7 +25,7 @@ interface EmailRecord {
   body: string;
   sentAt: string;
   mrfId: string | null;
-  mrf: { id: string; mrfNumber: string; title: string } | null;
+  mrf: { id: string; referenceNumber: string; mrfNumber: string | null; title: string } | null;
 }
 
 export default function EmailPage() {
@@ -98,14 +99,15 @@ export default function EmailPage() {
     setForm((prev) => ({
       ...prev,
       mrfId: mrf.id,
-      subject: prev.subject || `Re: MRF ${mrf.mrfNumber} — ${mrf.title}`,
+      subject: prev.subject || `Re: MRF ${mrf.mrfNumber || mrf.referenceNumber} — ${mrf.title}`,
     }));
-    setMrfSearch(`${mrf.mrfNumber} — ${mrf.title}`);
+    setMrfSearch(`${mrf.mrfNumber || mrf.referenceNumber} — ${mrf.title}`);
   };
 
   const filteredMrfs = mrfSearch.length > 0
     ? mrfs.filter((m) =>
-        m.mrfNumber.toLowerCase().includes(mrfSearch.toLowerCase()) ||
+        (m.mrfNumber || "").toLowerCase().includes(mrfSearch.toLowerCase()) ||
+        m.referenceNumber.toLowerCase().includes(mrfSearch.toLowerCase()) ||
         m.title.toLowerCase().includes(mrfSearch.toLowerCase())
       )
     : mrfs;
@@ -154,7 +156,7 @@ export default function EmailPage() {
                       <p className="text-sm font-medium text-gray-900 truncate">{email.subject}</p>
                       <p className="text-xs text-gray-500 truncate">To: {email.toEmail}</p>
                       {email.mrf && (
-                        <p className="text-xs text-blue-500 truncate">MRF: {email.mrf.mrfNumber}</p>
+                        <p className="text-xs text-blue-500 truncate">MRF: {email.mrf.mrfNumber || email.mrf.referenceNumber}</p>
                       )}
                       <p className="text-xs text-gray-400 mt-0.5">{formatDate(email.sentAt)}</p>
                     </li>
@@ -182,7 +184,7 @@ export default function EmailPage() {
                           href={`/dashboard/mrfs/${selected.mrf.id}`}
                           className="text-xs text-blue-600 hover:underline font-medium"
                         >
-                          {selected.mrf.mrfNumber} — {selected.mrf.title}
+                          {selected.mrf.mrfNumber || selected.mrf.referenceNumber} — {selected.mrf.title}
                         </Link>
                       </div>
                     )}
@@ -245,7 +247,7 @@ export default function EmailPage() {
                         className={`w-full px-3 py-2 text-left hover:bg-blue-50 transition-colors ${form.mrfId === m.id ? "bg-blue-50" : ""}`}
                         onMouseDown={() => { selectMrf(m); setShowMrfDropdown(false); }}
                       >
-                        <p className="text-sm font-medium text-gray-900">{m.mrfNumber} — {m.title}</p>
+                        <p className="text-sm font-medium text-gray-900">{m.mrfNumber || m.referenceNumber} — {m.title}</p>
                         <p className="text-xs text-yellow-600">{STATUS_LABELS[m.status] || m.status}</p>
                       </button>
                     ))}

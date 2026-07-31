@@ -29,7 +29,7 @@ interface CandidateDetail {
   documents: { id: string; name: string; documentType: string; createdAt: string }[];
 }
 
-interface MRFOption { id: string; mrfNumber: string; title: string; }
+interface MRFOption { id: string; referenceNumber: string; mrfNumber: string | null; title: string; }
 
 interface EditForm {
   firstName: string; lastName: string; email: string; phone: string;
@@ -429,7 +429,7 @@ export default function CandidateDetailPage() {
                 <SelectContent>
                   <SelectItem value="none">— None (unlink) —</SelectItem>
                   {mrfs.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.mrfNumber} – {m.title}</SelectItem>
+                    <SelectItem key={m.id} value={m.id}>{m.mrfNumber || m.referenceNumber} – {m.title}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

@@ -10,12 +10,13 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, CheckCircle, XCircle, Clock, Users, Loader2, Send, Printer, RefreshCw, Pencil } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Clock, Users, Loader2, Send, RefreshCw, Pencil, FileText } from "lucide-react";
 import { formatDate, MRF_STATUSES, CANDIDATE_STAGES } from "@/lib/utils";
 import { useSession } from "next-auth/react";
+import { MRFPdfPreview } from "@/components/mrf-pdf-preview";
 
 interface MRFDetail {
-  id: string; mrfNumber: string; title: string; status: string;
+  id: string; referenceNumber: string; mrfNumber: string | null; title: string; status: string;
   vacancyCount: number; justification: string;
   fillerName: string | null; fillerDesignation: string | null; ctcRange: string | null;
   location: string | null; reportingTo: string | null; jobProfile: string | null;
@@ -71,6 +72,17 @@ export default function MRFDetailPage() {
   const approvalLevel = (session?.user as { approvalLevel?: string | null })?.approvalLevel ?? null;
   const [mrf, setMrf] = useState<MRFDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [roleLabels, setRoleLabels] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    fetch("/api/roles")
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d)) setRoleLabels(Object.fromEntries(d.map((r: { key: string; label: string }) => [r.key, r.label])));
+      });
+  }, []);
+
+  const myDesignation = roleLabels[role] || role.replace(/_/g, " ");
 
   // Approve/reject dialog
   const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | null>(null);
@@ -91,6 +103,9 @@ export default function MRFDetailPage() {
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
+  // Requisition form PDF preview
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+
   const permissions = (session?.user as { permissions?: string[] })?.permissions || [];
   const canManageMrf = permissions.includes("MANAGE_MRF");
   const canSendApprovalEmail = permissions.includes("SEND_MRF_APPROVAL_EMAIL");
@@ -107,6 +122,12 @@ export default function MRFDetailPage() {
   };
 
   useEffect(() => { fetchMRF(); }, [id]);
+
+  const openApprovalDialog = (action: "approve" | "reject") => {
+    setApproverName(session?.user?.name || "");
+    setApproverDesignation(myDesignation);
+    setApprovalDialog(action);
+  };
 
   const handleApproval = async () => {
     setSubmitting(true);
@@ -161,10 +182,6 @@ export default function MRFDetailPage() {
     fetchMRF();
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   if (loading) return <div className="py-20 text-center text-gray-500"><Loader2 className="mx-auto h-8 w-8 animate-spin" /></div>;
   if (!mrf) return <div className="py-20 text-center text-gray-500">MRF not found.</div>;
 
@@ -185,14 +202,15 @@ export default function MRFDetailPage() {
               {statusInfo?.label || mrf.status}
             </span>
           </div>
-          <p className="text-sm text-gray-500 font-mono mt-1">{mrf.mrfNumber}</p>
+          <p className="text-sm text-gray-500 font-mono mt-1">
+            Ref: {mrf.referenceNumber}
+            {mrf.mrfNumber && <> · MRF No: {mrf.mrfNumber}</>}
+          </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {mrf.status === "APPROVED" && (
-            <Button variant="outline" onClick={handlePrint} className="print:hidden">
-              <Printer className="h-4 w-4" /> Print / PDF
-            </Button>
-          )}
+          <Button variant="outline" onClick={() => setPdfPreviewOpen(true)} className="print:hidden">
+            <FileText className="h-4 w-4" /> MRF PDF
+          </Button>
           {mrf.status === "REJECTED" && canManageMrf && (
             <>
               <Link href={`/dashboard/mrfs/${id}/edit`}>
@@ -207,10 +225,10 @@ export default function MRFDetailPage() {
           )}
           {canAct && (
             <>
-              <Button variant="outline" onClick={() => setApprovalDialog("reject")} className="text-red-600 border-red-200 hover:bg-red-50">
+              <Button variant="outline" onClick={() => openApprovalDialog("reject")} className="text-red-600 border-red-200 hover:bg-red-50">
                 <XCircle className="h-4 w-4" /> Reject
               </Button>
-              <Button onClick={() => setApprovalDialog("approve")}>
+              <Button onClick={() => openApprovalDialog("approve")}>
                 <CheckCircle className="h-4 w-4" />
                 {isManagerSelfApproval ? "Approve" : "Record Approval"}
               </Button>
@@ -222,7 +240,7 @@ export default function MRFDetailPage() {
       {/* Print-only header */}
       <div className="hidden print:block mb-6">
         <h1 className="text-2xl font-bold">{mrf.title}</h1>
-        <p className="font-mono text-sm text-gray-600">{mrf.mrfNumber} · {statusInfo?.label || mrf.status}</p>
+        <p className="font-mono text-sm text-gray-600">{mrf.mrfNumber || mrf.referenceNumber} · {statusInfo?.label || mrf.status}</p>
       </div>
 
       {mrf.status === "REJECTED" && mrf.rejectionReason && (
@@ -402,26 +420,19 @@ export default function MRFDetailPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            {!isManagerSelfApproval && (
-              <>
-                <div className="space-y-2">
-                  <Label>Approver Name *</Label>
-                  <Input
-                    placeholder="Name of person who approved/rejected"
-                    value={approverName}
-                    onChange={(e) => setApproverName(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Approver Designation</Label>
-                  <Input
-                    placeholder="Job title / designation"
-                    value={approverDesignation}
-                    onChange={(e) => setApproverDesignation(e.target.value)}
-                  />
-                </div>
-              </>
-            )}
+            <div className="space-y-2">
+              <Label>Approver Name</Label>
+              <Input value={approverName} disabled />
+              <p className="text-xs text-gray-400">Taken from your account — this is who the system records as the approver.</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Approver Designation</Label>
+              <Input
+                placeholder="Job title / designation"
+                value={approverDesignation}
+                onChange={(e) => setApproverDesignation(e.target.value)}
+              />
+            </div>
             <div className="space-y-2">
               <Label>{approvalDialog === "reject" ? "Reason for Rejection *" : "Notes / Reference"}</Label>
               <Textarea
@@ -515,6 +526,19 @@ export default function MRFDetailPage() {
               Restart
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Requisition Form PDF Preview */}
+      <Dialog open={pdfPreviewOpen} onOpenChange={setPdfPreviewOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-600" />
+              Manpower Requisition Form
+            </DialogTitle>
+          </DialogHeader>
+          {mrf && <MRFPdfPreview mrf={mrf} />}
         </DialogContent>
       </Dialog>
     </div>

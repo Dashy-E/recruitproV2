@@ -16,7 +16,8 @@ import { formatDate } from "@/lib/utils";
 
 interface MRF {
   id: string;
-  mrfNumber: string;
+  referenceNumber: string;
+  mrfNumber: string | null;
   title: string;
   status: string;
   vacancyCount: number;
@@ -164,7 +165,7 @@ export default function ApprovalsPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-sm text-gray-500">{mrf.mrfNumber}</span>
+                        <span className="font-mono text-sm text-gray-500">{mrf.mrfNumber || mrf.referenceNumber}</span>
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[mrf.status] || "bg-gray-100 text-gray-600"}`}>
                           {STATUS_LABELS[mrf.status] || mrf.status}
                         </span>
@@ -264,7 +265,7 @@ export default function ApprovalsPage() {
             </DialogTitle>
             {actionDialog && (
               <p className="text-sm text-gray-500 mt-1">
-                {actionDialog.mrf.mrfNumber} — {actionDialog.mrf.title}
+                {actionDialog.mrf.mrfNumber || actionDialog.mrf.referenceNumber} — {actionDialog.mrf.title}
               </p>
             )}
           </DialogHeader>
