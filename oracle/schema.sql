@@ -122,15 +122,18 @@ ALTER TABLE "RECRUIT_T_RolePermission" ADD CONSTRAINT "RolePermission_roleId_fke
     FOREIGN KEY ("roleId") REFERENCES "RECRUIT_T_Role"("id") ON DELETE CASCADE;
 
 CREATE TABLE "RECRUIT_T_User" (
-    "id"        VARCHAR2(30)  NOT NULL,
-    "name"      VARCHAR2(255) NOT NULL,
-    "userName"  VARCHAR2(255) NOT NULL,
-    "email"     VARCHAR2(255) NOT NULL,
-    "password"  VARCHAR2(255) NOT NULL,
-    "role"      VARCHAR2(50)  DEFAULT 'CANDIDATE' NOT NULL,
-    "isActive"  NUMBER(1)     DEFAULT 1 NOT NULL,
-    "createdAt" TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
-    "updatedAt" TIMESTAMP     NOT NULL,
+    "id"           VARCHAR2(30)  NOT NULL,
+    "name"         VARCHAR2(255) NOT NULL,
+    "userName"     VARCHAR2(255) NOT NULL,
+    "email"        VARCHAR2(255) NOT NULL,
+    "password"     VARCHAR2(255) NOT NULL,
+    "role"         VARCHAR2(50)  DEFAULT 'CANDIDATE' NOT NULL,
+    "isActive"     NUMBER(1)     DEFAULT 1 NOT NULL,
+    -- Uploaded via Users -> Edit -> Signature (png/jpg/jpeg only); stored on
+    -- disk under public/uploads/signatures, this is just the served path.
+    "signatureUrl" VARCHAR2(500),
+    "createdAt"    TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    "updatedAt"    TIMESTAMP     NOT NULL,
     CONSTRAINT "User_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "User_isActive_chk" CHECK ("isActive" IN (0,1))
 );

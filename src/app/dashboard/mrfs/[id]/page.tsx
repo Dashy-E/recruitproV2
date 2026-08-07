@@ -35,7 +35,7 @@ interface MRFDetail {
   orgUnit: { name: string; path: string } | null;
   department: { name: string };
   designation: { title: string; requiresPsychometric: boolean } | null;
-  createdBy: { name: string; email: string };
+  createdBy: { name: string; email: string; signatureUrl: string | null };
   approvalRecords: ApprovalRecord[];
   candidates: CandidateSummary[];
   // Server-computed: is the requesting user genuinely the designated
@@ -55,6 +55,7 @@ interface MRFDetail {
 interface ApprovalRecord {
   id: string; level: string; approverName: string; approverDesignation: string | null;
   status: string; notes: string | null; recordedAt: string;
+  approver: { name: string; signatureUrl: string | null } | null;
 }
 
 interface CandidateSummary {

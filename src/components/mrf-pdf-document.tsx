@@ -56,11 +56,20 @@ export interface MRFPdfData {
   designation: { title: string } | null;
   fillerName?: string | null;
   fillerDesignation?: string | null;
-  // Prints on the "Divisional Head" signature block in place of that static
-  // label — entered at creation, not tied to any actual approval record.
+  // Optional static designation label for the "Divisional Head" signature
+  // block header — entered at creation. Falls back to "Divisional Head"
+  // until an actual Divisional/Country Manager approval exists; once it
+  // does, that approver's uploaded signature/name takes over the slot.
   approvalSignatureName?: string | null;
   approvalSignatureDesignation?: string | null;
-  approvalRecords: { level: string; approverName: string; recordedAt: string; status: string }[];
+  createdBy?: { name: string; email: string; signatureUrl?: string | null } | null;
+  approvalRecords: {
+    level: string;
+    approverName: string;
+    recordedAt: string;
+    status: string;
+    approver?: { name: string; signatureUrl: string | null } | null;
+  }[];
 }
 
 const INK = "#1f2937";
@@ -129,8 +138,11 @@ const styles = StyleSheet.create({
   sigBlock: { flex: 1, marginRight: 16 },
   sigHead: { fontSize: 9, fontWeight: 700, color: MUTED, marginBottom: 10 },
   // marginTop is blank room for an actual pen signature above the line —
-  // deliberately generous, unlike the tighter spacing used elsewhere on the page.
+  // deliberately generous, unlike the tighter spacing used elsewhere on the
+  // page. Skipped when an uploaded signature image already fills that role.
   sigLine: { borderTop: `0.75pt solid ${INK}`, marginTop: 16, paddingTop: 3, fontSize: 8.5 },
+  sigLineWithImage: { borderTop: `0.75pt solid ${INK}`, marginTop: 2, paddingTop: 3, fontSize: 8.5 },
+  signatureImage: { width: 130, height: 42, objectFit: "contain", marginTop: 4 },
 
   footer: { marginTop: 10, fontSize: 7.5, color: MUTED, textAlign: "center" },
 });
@@ -188,6 +200,16 @@ function SentenceCheckbox({ text, checked }: { text: string; checked: boolean })
 
 export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
   const rootOrgName = mrf.orgUnit?.path?.split(" / ")[0] || mrf.orgUnit?.name || "";
+
+  const creatorSignatureUrl = mrf.createdBy?.signatureUrl || null;
+
+  // Stage 1 accepts either a Divisional or a Country Manager (see
+  // src/lib/permissions.ts) — LEVEL_LABEL in approve/route.ts groups both
+  // under the same "DIVISIONAL_MANAGER" record level, so whichever of the
+  // two actually approved is who shows up here.
+  const divisionalRecord = mrf.approvalRecords.find((r) => r.level === "DIVISIONAL_MANAGER" && r.status === "APPROVED");
+  const divisionalApproverName = divisionalRecord?.approverName || null;
+  const divisionalSignatureUrl = divisionalRecord?.approver?.signatureUrl || null;
 
   return (
     <Document>
@@ -311,10 +333,16 @@ export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
         </View>
         <View style={styles.row}>
           <View style={styles.sigBlock}>
-            <Text style={styles.sigLine}>{fillerLine(mrf.fillerName, mrf.fillerDesignation)}</Text>
+            {creatorSignatureUrl && <Image src={creatorSignatureUrl} style={styles.signatureImage} />}
+            <Text style={creatorSignatureUrl ? styles.sigLineWithImage : styles.sigLine}>
+              {fillerLine(mrf.fillerName, mrf.fillerDesignation)}
+            </Text>
           </View>
           <View style={styles.sigBlock}>
-            <Text style={styles.sigLine}>{mrf.approvalSignatureName || " "}</Text>
+            {divisionalSignatureUrl && <Image src={divisionalSignatureUrl} style={styles.signatureImage} />}
+            <Text style={divisionalSignatureUrl ? styles.sigLineWithImage : styles.sigLine}>
+              {divisionalApproverName || mrf.approvalSignatureName || " "}
+            </Text>
           </View>
         </View>
 

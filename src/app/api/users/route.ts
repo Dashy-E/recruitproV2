@@ -17,7 +17,7 @@ export async function GET() {
   }
 
   const rows = await db("RECRUIT_T_User")
-    .select("id", "name", "userName", "email", "role", "isActive", "createdAt")
+    .select("id", "name", "userName", "email", "role", "isActive", "createdAt", "signatureUrl")
     .orderBy("createdAt", "desc");
 
   const [assignments, orgUnits, functionalHeadRows] = await Promise.all([
@@ -34,6 +34,7 @@ export async function GET() {
     role: r.role,
     isActive: fromBool(r.isActive),
     createdAt: r.createdAt,
+    signatureUrl: r.signatureUrl || null,
     orgUnits: assignments
       .filter((a: any) => a.userId === r.id)
       .map((a: any) => {

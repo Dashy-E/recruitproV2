@@ -17,7 +17,10 @@ interface User {
   id: string; name: string; userName: string; email: string; role: string; isActive: boolean; createdAt: string;
   orgUnits: { id: string; name: string; path: string }[];
   departmentId: string | null;
+  signatureUrl: string | null;
 }
+
+const ALLOWED_SIGNATURE_TYPES = ["image/png", "image/jpeg"];
 interface Department { id: string; name: string }
 interface Role { id: string; key: string; label: string; isSystem: boolean; isActive: boolean; approvalLevel: string | null; permissions: string[] }
 
@@ -67,6 +70,9 @@ export default function UsersPage() {
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState("");
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
+  const [signatureError, setSignatureError] = useState("");
 
   const fetchUsers = () => {
     fetch("/api/users").then((r) => r.json()).then((d) => { setUsers(Array.isArray(d) ? d : []); setLoading(false); });
@@ -135,6 +141,22 @@ export default function UsersPage() {
       password: "", confirmPassword: "", isActive: u.isActive,
     });
     setEditError("");
+    setSignatureFile(null);
+    setSignaturePreview(u.signatureUrl);
+    setSignatureError("");
+  };
+
+  const handleSignatureFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setSignatureError("");
+    if (!file) return;
+    if (!ALLOWED_SIGNATURE_TYPES.includes(file.type)) {
+      setSignatureError("Only PNG, JPG, or JPEG files are accepted.");
+      e.target.value = "";
+      return;
+    }
+    setSignatureFile(file);
+    setSignaturePreview(URL.createObjectURL(file));
   };
 
   const handleEdit = async () => {
@@ -150,7 +172,7 @@ export default function UsersPage() {
       departmentId: editForm.userRole === "FUNCTIONAL_HEAD" ? editForm.departmentId : null,
     };
     if (editForm.password) payload.password = editForm.password;
-    const [res] = await Promise.all([
+    const requests = [
       fetch(`/api/users/${editUser.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -161,7 +183,13 @@ export default function UsersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orgUnitIds: editForm.orgUnitIds }),
       }),
-    ]);
+    ];
+    if (signatureFile) {
+      const fd = new FormData();
+      fd.append("file", signatureFile);
+      requests.push(fetch(`/api/users/${editUser.id}/signature`, { method: "POST", body: fd }));
+    }
+    const [res] = await Promise.all(requests);
     setEditSubmitting(false);
     if (!res.ok) {
       const data = await res.json();
@@ -354,6 +382,23 @@ export default function UsersPage() {
                   )}
                 </div>
               </div>
+            </div>
+
+            <div className="col-span-2 space-y-2 border-t pt-4">
+              <Label>Signature</Label>
+              <p className="text-xs text-gray-500">PNG, JPG, or JPEG only. Used on printed documents where this user's signature is required.</p>
+              <div className="flex items-center gap-4">
+                {signaturePreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={signaturePreview} alt="Signature preview" className="h-16 border border-gray-200 rounded bg-white object-contain px-2" />
+                ) : (
+                  <div className="h-16 w-32 flex items-center justify-center border border-dashed border-gray-300 rounded text-xs text-gray-400">
+                    No signature
+                  </div>
+                )}
+                <Input type="file" accept="image/png,image/jpeg" onChange={handleSignatureFileChange} className="max-w-xs" />
+              </div>
+              {signatureError && <p className="text-xs text-red-500">{signatureError}</p>}
             </div>
 
             {editError && <div className="col-span-2 rounded-md bg-red-50 p-3 text-sm text-red-600">{editError}</div>}

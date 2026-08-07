@@ -38,7 +38,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const [department, designation, createdBy, heldBy] = await Promise.all([
     db("RECRUIT_T_Department").where({ id: mrf.departmentId }).first(),
     mrf.designationId ? db("RECRUIT_T_Designation").where({ id: mrf.designationId }).first() : null,
-    db("RECRUIT_T_User").where({ id: mrf.createdById }).select("name", "email").first(),
+    db("RECRUIT_T_User").where({ id: mrf.createdById }).select("name", "email", "signatureUrl").first(),
     mrf.heldById ? db("RECRUIT_T_User").where({ id: mrf.heldById }).select("name").first() : null,
   ]);
 
@@ -54,14 +54,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const approverIds = [...new Set(approvalRecordsRaw.map((r: any) => r.approverId).filter(Boolean))];
   const documentIds = [...new Set(approvalRecordsRaw.map((r: any) => r.documentId).filter(Boolean))];
   const [approvers, approvalDocs] = await Promise.all([
-    db("RECRUIT_T_User").whereIn("id", approverIds).select("id", "name"),
+    db("RECRUIT_T_User").whereIn("id", approverIds).select("id", "name", "signatureUrl"),
     db("RECRUIT_T_Document").whereIn("id", documentIds),
   ]);
   const approvalRecords = approvalRecordsRaw.map((r: any) => ({
     ...r,
     approver: r.approverId ? (() => {
       const a = approvers.find((x: any) => x.id === r.approverId);
-      return a ? { name: a.name } : null;
+      return a ? { name: a.name, signatureUrl: a.signatureUrl || null } : null;
     })() : null,
     document: r.documentId ? approvalDocs.find((d: any) => d.id === r.documentId) || null : null,
   }));
