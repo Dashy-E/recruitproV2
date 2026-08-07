@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { toBool, fromBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
+import { newId } from "@/lib/id";
 import bcrypt from "bcryptjs";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -17,7 +18,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const { id } = await params;
-  const { name, userName, email, password, userRole, isActive } = await req.json();
+  const { name, userName, email, password, userRole, isActive, departmentId } = await req.json();
 
   // Only ADMIN can promote someone to ADMIN
   if (myRole !== "ADMIN" && userRole === "ADMIN") {
@@ -43,14 +44,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     await db("RECRUIT_T_User").where({ id }).update(data);
 
+    // Keep the department-functional-head mapping in sync with the role:
+    // a FUNCTIONAL_HEAD's department drives which MRFs they can approve
+    // (see src/lib/mrf-approval.ts), so it needs to stay editable here, not
+    // just set once at creation. Any user who isn't (or is no longer) a
+    // FUNCTIONAL_HEAD has its mapping cleared — approval rights shouldn't
+    // linger past a role change.
+    const finalRole = userRole !== undefined ? userRole : target.role;
+    if (finalRole === "FUNCTIONAL_HEAD" && departmentId) {
+      await db("RECRUIT_T_DepartmentFunctionalHead").where({ userId: id }).del();
+      await db("RECRUIT_T_DepartmentFunctionalHead").insert({ id: newId(), userId: id, departmentId });
+    } else if (finalRole !== "FUNCTIONAL_HEAD") {
+      await db("RECRUIT_T_DepartmentFunctionalHead").where({ userId: id }).del();
+    }
+
     const row = await db("RECRUIT_T_User")
       .where({ id })
       .select("id", "name", "userName", "email", "role", "isActive", "createdAt")
       .first();
 
-    const [assignments, orgUnits] = await Promise.all([
+    const [assignments, orgUnits, functionalHeadRow] = await Promise.all([
       db("RECRUIT_T_UserOrgUnit").where({ userId: id }).select("orgUnitId"),
       getAllOrgUnits(),
+      db("RECRUIT_T_DepartmentFunctionalHead").where({ userId: id }).select("departmentId").first(),
     ]);
 
     return NextResponse.json({
@@ -65,6 +81,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         const path = getAncestorPath(a.orgUnitId, orgUnits);
         return { id: a.orgUnitId, name: path.at(-1)?.name ?? a.orgUnitId, path: path.map((p) => p.name).join(" / ") };
       }),
+      departmentId: functionalHeadRow?.departmentId ?? null,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

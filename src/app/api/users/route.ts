@@ -20,9 +20,10 @@ export async function GET() {
     .select("id", "name", "userName", "email", "role", "isActive", "createdAt")
     .orderBy("createdAt", "desc");
 
-  const [assignments, orgUnits] = await Promise.all([
+  const [assignments, orgUnits, functionalHeadRows] = await Promise.all([
     db("RECRUIT_T_UserOrgUnit").select("userId", "orgUnitId"),
     getAllOrgUnits(),
+    db("RECRUIT_T_DepartmentFunctionalHead").select("userId", "departmentId"),
   ]);
 
   const users = rows.map((r: any) => ({
@@ -39,6 +40,9 @@ export async function GET() {
         const path = getAncestorPath(a.orgUnitId, orgUnits);
         return { id: a.orgUnitId, name: path.at(-1)?.name ?? a.orgUnitId, path: path.map((p) => p.name).join(" / ") };
       }),
+    // A user can technically be mapped to more than one department, but the
+    // Add/Edit User UI only ever manages a single one — take the first.
+    departmentId: functionalHeadRows.find((f: any) => f.userId === r.id)?.departmentId ?? null,
   }));
 
   return NextResponse.json(users);

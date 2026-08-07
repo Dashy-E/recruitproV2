@@ -12,7 +12,7 @@ function getLogoSrc(rootOrgName: string): string {
 function getCompanyName(rootOrgName: string): string {
   if (rootOrgName === "PSPL") return "Primawave Software Pvt. Ltd.";
   if (rootOrgName === "Gemini") return "Gemini Sampling Solution Private Limited";
-  return "Mitra SK Private Limited";
+  return "MSK Private Limited";
 }
 
 // Field mapping is grounded in this app's actual 3-stage approval chain
@@ -56,6 +56,10 @@ export interface MRFPdfData {
   designation: { title: string } | null;
   fillerName?: string | null;
   fillerDesignation?: string | null;
+  // Prints on the "Divisional Head" signature block in place of that static
+  // label — entered at creation, not tied to any actual approval record.
+  approvalSignatureName?: string | null;
+  approvalSignatureDesignation?: string | null;
   approvalRecords: { level: string; approverName: string; recordedAt: string; status: string }[];
 }
 
@@ -65,8 +69,8 @@ const RULE = "#9ca3af";
 const ACCENT = "#1e3a5f";
 
 const styles = StyleSheet.create({
-  page: { padding: 30, paddingTop: 24, fontSize: 9, fontFamily: "Helvetica", color: INK, border: `1pt solid ${RULE}` },
-  header: { alignItems: "center", marginBottom: 10, paddingBottom: 10, borderBottom: `1.5pt solid ${ACCENT}` },
+  page: { padding: 26, paddingTop: 20, fontSize: 9, fontFamily: "Helvetica", color: INK, border: `1pt solid ${RULE}` },
+  header: { alignItems: "center", marginBottom: 8, paddingBottom: 8, borderBottom: `1.5pt solid ${ACCENT}` },
   logo: { width: 130, height: 42, objectFit: "contain", marginBottom: 4 },
   // PSPL's logo has a wider landscape aspect ratio than the shared box —
   // give it its own slightly larger box matching its proportions instead
@@ -74,25 +78,27 @@ const styles = StyleSheet.create({
   logoPspl: { width: 115, height: 67, objectFit: "contain", marginBottom: 4 },
   companyName: { fontSize: 12, fontWeight: 700, color: ACCENT },
   formTitle: { fontSize: 13, fontWeight: 700, marginTop: 4, letterSpacing: 0.5 },
-  topRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 10, fontSize: 9, color: MUTED },
+  topRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8, fontSize: 9, color: MUTED },
 
   sectionHeader: {
     fontSize: 9.5,
     fontWeight: 700,
     color: INK,
     backgroundColor: "#e5e7eb",
-    paddingVertical: 3,
+    paddingVertical: 2,
     paddingHorizontal: 6,
-    marginTop: 10,
-    marginBottom: 6,
+    marginTop: 7,
+    marginBottom: 4,
   },
 
-  row: { flexDirection: "row", marginBottom: 7, alignItems: "flex-end" },
+  row: { flexDirection: "row", marginBottom: 5, alignItems: "flex-end" },
   spaceBetween: { justifyContent: "space-between" },
   field: { flexDirection: "row", flex: 1, alignItems: "flex-end" },
   label: { marginRight: 4, color: MUTED },
   rowLabel: { color: MUTED },
   value: { flex: 1, borderBottom: `0.75pt solid ${RULE}`, paddingBottom: 2, minHeight: 12, color: "#111827", fontWeight: 600 },
+  valueTall: { flex: 1, borderBottom: `0.75pt solid ${RULE}`, paddingBottom: 2, minHeight: 22, color: "#111827", fontWeight: 600 },
+  valueBlankLine: { flex: 1, borderBottom: `0.75pt solid ${RULE}`, minHeight: 12 },
 
   checkboxGroup: { flexDirection: "row", alignItems: "center" },
   checkboxRow: { flexDirection: "row", alignItems: "center", marginLeft: 16 },
@@ -113,29 +119,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 9,
-    paddingBottom: 4,
+    marginBottom: 6,
+    paddingBottom: 3,
     borderBottom: `0.5pt solid #e5e7eb`,
   },
   sentenceText: { flex: 1, paddingRight: 12, color: INK },
 
-  divider: { borderBottom: `0.75pt solid ${RULE}`, marginVertical: 10 },
+  divider: { borderBottom: `0.75pt solid ${RULE}`, marginVertical: 7 },
   sigBlock: { flex: 1, marginRight: 16 },
-  sigHead: { fontSize: 9, fontWeight: 700, color: MUTED, marginBottom: 14 },
-  sigLine: { borderTop: `0.75pt solid ${INK}`, marginTop: 6, paddingTop: 3, fontSize: 8.5 },
+  sigHead: { fontSize: 9, fontWeight: 700, color: MUTED, marginBottom: 10 },
+  // marginTop is blank room for an actual pen signature above the line —
+  // deliberately generous, unlike the tighter spacing used elsewhere on the page.
+  sigLine: { borderTop: `0.75pt solid ${INK}`, marginTop: 16, paddingTop: 3, fontSize: 8.5 },
 
-  footer: { marginTop: 14, fontSize: 7.5, color: MUTED, textAlign: "center" },
+  footer: { marginTop: 10, fontSize: 7.5, color: MUTED, textAlign: "center" },
 });
 
 // labelWidth pins the label column to a fixed width so that stacked rows in
 // the same section (e.g. Age / Work experience on the left, Qualification /
 // Preferred / Industry background on the right) line their underlines up
 // instead of each starting wherever its own label text happens to end.
-function Field({ label, value, flex = 1, labelWidth }: { label: string; value: string; flex?: number; labelWidth?: number }) {
+function Field({ label, value, flex = 1, labelWidth, valueStyle }: { label: string; value: string; flex?: number; labelWidth?: number; valueStyle?: typeof styles.value }) {
   return (
     <View style={[styles.field, { flex }]}>
       <Text style={labelWidth ? [styles.label, { width: labelWidth }] : styles.label}>{label}:</Text>
-      <Text style={styles.value}>{value || ""}</Text>
+      <Text style={valueStyle || styles.value}>{value || ""}</Text>
     </View>
   );
 }
@@ -159,7 +167,7 @@ function Checkbox({ label, checked }: { label: string; checked: boolean }) {
     <View style={styles.checkboxRow}>
       <Text style={styles.checkboxLabel}>{label}</Text>
       <View style={checked ? [styles.checkbox, styles.checkboxChecked] : styles.checkbox}>
-        {checked && <Tick />}
+        {!!checked && <Tick />}
       </View>
     </View>
   );
@@ -172,21 +180,14 @@ function SentenceCheckbox({ text, checked }: { text: string; checked: boolean })
     <View style={styles.sentenceRow}>
       <Text style={styles.sentenceText}>{text}</Text>
       <View style={checked ? [styles.checkbox, styles.checkboxChecked] : styles.checkbox}>
-        {checked && <Tick />}
+        {!!checked && <Tick />}
       </View>
     </View>
   );
 }
 
-function findApprover(records: MRFPdfData["approvalRecords"], level: string) {
-  return records.find((r) => r.level === level && r.status === "APPROVED");
-}
-
 export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
   const rootOrgName = mrf.orgUnit?.path?.split(" / ")[0] || mrf.orgUnit?.name || "";
-  const divisionalApprover = findApprover(mrf.approvalRecords, "DIVISIONAL_MANAGER");
-  const functionalApprover = findApprover(mrf.approvalRecords, "FUNCTIONAL_HEAD");
-  const countryApprover = findApprover(mrf.approvalRecords, "COUNTRY_MANAGER");
 
   return (
     <Document>
@@ -270,7 +271,10 @@ export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
           <Field label="Subordinates" value="" flex={1} />
         </View>
         <View style={styles.row}>
-          <Field label="Job profile (attach detailed JD for new positions)" value={mrf.jobProfile || ""} />
+          <Field label="Job profile (attach detailed JD for new positions)" value={mrf.jobProfile || ""} valueStyle={styles.valueTall} />
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.valueBlankLine}> </Text>
         </View>
         <View style={styles.row}>
           <Field label="No. required" value={String(mrf.vacancyCount)} flex={1} />
@@ -303,25 +307,26 @@ export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
 
         <View style={styles.row}>
           <Text style={[styles.sigHead, { flex: 1 }]}>Branch/ Departmental Head</Text>
-          <Text style={[styles.sigHead, { flex: 1 }]}>Divisional Head</Text>
+          <Text style={[styles.sigHead, { flex: 1 }]}>{mrf.approvalSignatureDesignation || "Divisional Head"}</Text>
         </View>
         <View style={styles.row}>
           <View style={styles.sigBlock}>
-            <Text style={styles.sigLine}>{approverLine(functionalApprover)}</Text>
+            <Text style={styles.sigLine}>{fillerLine(mrf.fillerName, mrf.fillerDesignation)}</Text>
           </View>
           <View style={styles.sigBlock}>
-            <Text style={styles.sigLine}>{approverLine(divisionalApprover)}</Text>
+            <Text style={styles.sigLine}>{mrf.approvalSignatureName || " "}</Text>
           </View>
         </View>
 
-        <View style={[styles.row, styles.spaceBetween, { marginTop: 18 }]}>
-          <View style={styles.checkboxGroup}>
+        <View style={[styles.row, styles.spaceBetween, { marginTop: 18, alignItems: "flex-start" }]}>
+          <View style={[styles.checkboxGroup, { marginTop: 14 }]}>
             <Text style={styles.rowLabel}>Sanctioned</Text>
             <Checkbox label="Y" checked={mrf.status === "APPROVED"} />
             <Checkbox label="N" checked={mrf.status === "REJECTED"} />
           </View>
-          <View style={[styles.sigBlock, { flex: 1, marginLeft: 20, marginRight: 0 }]}>
-            <Text style={styles.sigLine}>{approverLine(countryApprover)} — Managing Director</Text>
+          <View style={{ flex: 1, marginLeft: 20 }}>
+            <Text style={styles.sigLine}> </Text>
+            <Text style={[styles.sigHead, { marginTop: 3, marginBottom: 0 }]}>Managing Director</Text>
           </View>
         </View>
 
@@ -342,10 +347,4 @@ function formatReplacementReason(reason?: string | null) {
 function fillerLine(name?: string | null, designation?: string | null) {
   if (!name) return " ";
   return designation ? `${name} — ${designation}` : name;
-}
-
-function approverLine(record?: { approverName: string; recordedAt: string }) {
-  if (!record) return " ";
-  const date = new Date(record.recordedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  return `${record.approverName} — ${date}`;
 }

@@ -27,6 +27,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .first();
   if (!mrf) return NextResponse.json({ error: "MRF not found" }, { status: 404 });
 
+  const sender = await db("RECRUIT_T_User as u")
+    .join("RECRUIT_T_Role as r", "r.key", "u.role")
+    .where("u.id", userId)
+    .select("u.name", "u.email", "r.label as roleLabel")
+    .first();
+
   const orgUnitPath = getAncestorPath(mrf.orgUnitId, await getAllOrgUnits());
   const orgUnitLabel = orgUnitPath.map((p) => p.name).join(" / ");
 
@@ -34,9 +40,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const mrfLink = `${appUrl}/dashboard/mrfs/${id}`;
 
   const statusLabels: Record<string, string> = {
-    PENDING_DIVISIONAL: "Pending Divisional Approval",
+    PENDING_DIVISIONAL: "Pending Divisional/Country Manager Approval",
+    PENDING_COUNTRY_SUPERVISOR: "Pending Country Supervisor Approval",
     PENDING_FUNCTIONAL: "Pending Functional Head Approval",
-    PENDING_COUNTRY: "Pending Country Manager Approval",
     APPROVED: "Fully Approved",
     REJECTED: "Rejected",
   };
@@ -45,15 +51,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const subjectLine = `Action Required: ${mrf.mrfNumber || mrf.referenceNumber} — ${mrf.title}`;
 
   const emailBody = [
-    message ? `${message}\n` : "",
+    message ? `${message}\n` : null,
     `MRF Details:`,
     `  Reference : ${mrf.referenceNumber}`,
-    mrf.mrfNumber ? `  MRF No.   : ${mrf.mrfNumber}` : "",
+    mrf.mrfNumber ? `  MRF No.   : ${mrf.mrfNumber}` : null,
     `  Title     : ${mrf.title}`,
     `  Location  : ${orgUnitLabel || "—"}`,
     `  Department: ${mrf.deptName || "—"}`,
     `  Vacancies : ${mrf.vacancyCount}`,
-    mrf.ctcRange ? `  CTC Range : ${mrf.ctcRange}` : "",
+    mrf.ctcRange ? `  CTC Range : ${mrf.ctcRange}` : null,
     `  Status    : ${statusLabel}`,
     ``,
     `Review the MRF directly by clicking the link below:`,
@@ -61,9 +67,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     ``,
     `If you are unable to click the link, copy and paste it into your browser.`,
     ``,
-    `Thank you,`,
-    `RecruitPro ERP`,
-  ].filter((l) => l !== "").join("\n");
+    `Thanks & Regards`,
+    sender?.name || null,
+    sender?.roleLabel || null,
+    sender?.email || null,
+  ].filter((l) => l !== null).join("\n");
 
   // Try SMTP
   if (process.env.SMTP_HOST) {
@@ -100,6 +108,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   } catch (err) {
     console.error("Email record insert failed:", err);
   }
+
+  // A mail just went out to this stage's approver — restart the 3-day
+  // reminder clock (src/lib/mrf-reminders.ts) from here rather than leaving
+  // it counting from whenever the last automatic notification fired.
+  await db("RECRUIT_T_MRF").where({ id }).update({ lastReminderSentAt: new Date() }).catch(() => {});
 
   return NextResponse.json({ success: true });
 }

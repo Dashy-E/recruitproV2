@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,15 +9,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ArrowLeft, Loader2, Send } from "lucide-react";
+import { ArrowLeft, Loader2, Send, Pencil } from "lucide-react";
 import Link from "next/link";
 import { OrgUnitPicker, OrgTreeNode } from "@/components/org-unit-picker";
+import { toast } from "@/hooks/use-toast";
 
 interface Department { id: string; name: string; designations: Designation[] }
 interface Designation { id: string; title: string; requiresPsychometric: boolean }
 
 export default function NewMRFPage() {
   const router = useRouter();
+  const { data: session } = useSession();
 
   // Org data
   const [orgTree, setOrgTree] = useState<OrgTreeNode[]>([]);
@@ -66,6 +69,11 @@ export default function NewMRFPage() {
   const [fillerName, setFillerName] = useState("");
   const [fillerDesignation, setFillerDesignation] = useState("");
 
+  // Optional — prints on the PDF's "Divisional Head" signature block in
+  // place of that static label, instead of pulling from an actual approval.
+  const [approvalSignatureName, setApprovalSignatureName] = useState("");
+  const [approvalSignatureDesignation, setApprovalSignatureDesignation] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -77,6 +85,9 @@ export default function NewMRFPage() {
   const [approverMessage, setApproverMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
+  const [eligibleApprovers, setEligibleApprovers] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [loadingApprovers, setLoadingApprovers] = useState(false);
+  const [editingApproverEmail, setEditingApproverEmail] = useState(false);
 
   const designations = departments.find((d) => d.id === selectedDepartment)?.designations || [];
 
@@ -84,6 +95,11 @@ export default function NewMRFPage() {
     fetch("/api/org-units/tree").then((r) => r.json()).then((d) => setOrgTree(Array.isArray(d) ? d : []));
     fetch("/api/org/departments").then((r) => r.json()).then((d) => setDepartments(Array.isArray(d) ? d : []));
   }, []);
+
+  // "Raised By" defaults to whoever's actually submitting the form.
+  useEffect(() => {
+    if (session?.user?.name) setFillerName(session.user.name);
+  }, [session?.user?.name]);
 
   const isValid = () => {
     if (!title || !selectedOrgUnit || !selectedDepartment) return false;
@@ -138,6 +154,8 @@ export default function NewMRFPage() {
       // Filler details
       fillerName,
       fillerDesignation,
+      approvalSignatureName: approvalSignatureName || null,
+      approvalSignatureDesignation: approvalSignatureDesignation || null,
     };
 
     const res = await fetch("/api/mrfs", {
@@ -153,6 +171,15 @@ export default function NewMRFPage() {
       setCreatedMrfId(mrf.id);
       setCreatedMrfNumber(mrf.referenceNumber || "");
       setSendModalOpen(true);
+
+      // Who's eligible to act at stage 1 (Divisional/Country Manager, org-scoped)
+      // for this brand-new MRF — same rules used to pick auto-notification
+      // recipients, surfaced here so the modal is a dropdown, not free text.
+      setLoadingApprovers(true);
+      fetch(`/api/mrfs/${mrf.id}/eligible-approvers`)
+        .then((r) => r.json())
+        .then((d) => setEligibleApprovers(Array.isArray(d) ? d : []))
+        .finally(() => setLoadingApprovers(false));
     } else {
       const data = await res.json();
       setError(data.error || "Failed to create MRF.");
@@ -170,6 +197,7 @@ export default function NewMRFPage() {
     });
     setSending(false);
     if (res.ok) {
+      toast({ variant: "success", title: "Email sent", description: `Notification sent to ${approverEmail}.` });
       router.push(`/dashboard/mrfs/${createdMrfId}`);
     } else {
       const data = await res.json().catch(() => ({}));
@@ -470,6 +498,8 @@ export default function NewMRFPage() {
                 placeholder="Name of person submitting this MRF"
                 value={fillerName}
                 onChange={(e) => setFillerName(e.target.value)}
+                readOnly
+                className="bg-gray-50 cursor-not-allowed"
               />
             </div>
             <div className="space-y-2">
@@ -478,6 +508,34 @@ export default function NewMRFPage() {
                 placeholder="Your designation / job title"
                 value={fillerDesignation}
                 onChange={(e) => setFillerDesignation(e.target.value)}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Approval Signature (optional — for the printed PDF only) */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Approval Signature (optional)</CardTitle>
+            <p className="text-sm text-gray-500">
+              Prints on the requisition PDF's "Divisional Head" signature block, in place of that label. Leave blank to keep the default "Divisional Head" label.
+            </p>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input
+                placeholder="Name to print on the signature line"
+                value={approvalSignatureName}
+                onChange={(e) => setApprovalSignatureName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Designation</Label>
+              <Input
+                placeholder="e.g. Regional Manager"
+                value={approvalSignatureDesignation}
+                onChange={(e) => setApprovalSignatureDesignation(e.target.value)}
               />
             </div>
           </CardContent>
@@ -517,13 +575,47 @@ export default function NewMRFPage() {
               Send it to the first approver now.
             </div>
             <div className="space-y-2">
-              <Label>Approver Email *</Label>
-              <Input
-                type="email"
-                placeholder="divisional.manager@company.com"
-                value={approverEmail}
-                onChange={(e) => setApproverEmail(e.target.value)}
-              />
+              <div className="flex items-center justify-between">
+                <Label>Approver *</Label>
+                {!loadingApprovers && eligibleApprovers.length > 0 && (
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    onClick={() => setEditingApproverEmail((v) => !v)}
+                  >
+                    <Pencil className="h-3 w-3" />
+                    {editingApproverEmail ? "Choose from list" : "Wrong email? Edit"}
+                  </button>
+                )}
+              </div>
+              {loadingApprovers ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500 py-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading eligible approvers…
+                </div>
+              ) : eligibleApprovers.length > 0 && !editingApproverEmail ? (
+                <Select value={approverEmail} onValueChange={setApproverEmail}>
+                  <SelectTrigger><SelectValue placeholder="Select an approver" /></SelectTrigger>
+                  <SelectContent>
+                    {eligibleApprovers.map((a) => (
+                      <SelectItem key={a.id} value={a.email}>{a.name} — {a.email}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <>
+                  {eligibleApprovers.length === 0 && (
+                    <p className="text-xs text-amber-600">
+                      No eligible approver found with org access for this location — enter an email manually.
+                    </p>
+                  )}
+                  <Input
+                    type="email"
+                    placeholder="divisional.manager@company.com"
+                    value={approverEmail}
+                    onChange={(e) => setApproverEmail(e.target.value)}
+                  />
+                </>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Message (optional)</Label>

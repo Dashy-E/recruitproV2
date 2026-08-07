@@ -25,7 +25,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { label, approvalLevel, isActive, permissions } = await req.json();
 
-  if (approvalLevel !== undefined && approvalLevel !== null && !["DIVISIONAL", "FUNCTIONAL", "COUNTRY", "ANY"].includes(approvalLevel)) {
+  if (approvalLevel !== undefined && approvalLevel !== null && !["DIVISIONAL", "FUNCTIONAL", "COUNTRY", "COUNTRY_SUPERVISOR", "ANY"].includes(approvalLevel)) {
     return NextResponse.json({ error: "Invalid approval level" }, { status: 400 });
   }
   let permissionKeys: string[] | undefined;

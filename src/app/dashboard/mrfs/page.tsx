@@ -23,23 +23,17 @@ interface MRF {
   department: { name: string };
   createdBy: { name: string };
   _count: { candidates: number };
+  // Server-computed org/department-scoped eligibility — see src/lib/mrf-approval.ts.
+  canApprove: boolean;
 }
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "secondary",
   PENDING_DIVISIONAL: "warning",
+  PENDING_COUNTRY_SUPERVISOR: "warning",
   PENDING_FUNCTIONAL: "warning",
-  PENDING_COUNTRY: "warning",
   APPROVED: "success",
   REJECTED: "destructive",
-};
-
-// Level-specific approvers (not universal "ANY" approvers) get a dedicated
-// "pending for me" banner on this list page.
-const LEVEL_TO_STATUS: Record<string, string> = {
-  DIVISIONAL: "PENDING_DIVISIONAL",
-  FUNCTIONAL: "PENDING_FUNCTIONAL",
-  COUNTRY: "PENDING_COUNTRY",
 };
 
 function MRFsContent() {
@@ -53,8 +47,9 @@ function MRFsContent() {
   const [loading, setLoading] = useState(true);
 
   const canCreate = permissions.includes("CREATE_MRF");
-  const myPendingStatus = approvalLevel && approvalLevel !== "ANY" ? LEVEL_TO_STATUS[approvalLevel] : null;
-  const pendingForMe = myPendingStatus ? mrfs.filter((m) => m.status === myPendingStatus) : [];
+  // Server-computed (org/department-scoped) — not universal "ANY" approvers,
+  // who see everything and don't need a "pending for me" banner.
+  const pendingForMe = approvalLevel && approvalLevel !== "ANY" ? mrfs.filter((m) => m.canApprove) : [];
 
   useEffect(() => {
     setLoading(true);

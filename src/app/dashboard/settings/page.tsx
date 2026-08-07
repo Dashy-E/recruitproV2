@@ -45,8 +45,9 @@ export default async function SettingsPage() {
     HR: "bg-blue-100 text-blue-700",
     BRANCH_MANAGER: "bg-green-100 text-green-700",
     DIVISIONAL_MANAGER: "bg-yellow-100 text-yellow-700",
-    FUNCTIONAL_HEAD: "bg-orange-100 text-orange-700",
     COUNTRY_MANAGER: "bg-red-100 text-red-700",
+    COUNTRY_SUPERVISOR: "bg-teal-100 text-teal-700",
+    FUNCTIONAL_HEAD: "bg-orange-100 text-orange-700",
     CANDIDATE: "bg-gray-100 text-gray-700",
   };
 
@@ -89,7 +90,7 @@ export default async function SettingsPage() {
               { label: "Framework", value: "Next.js App Router" },
               { label: "Query Builder", value: "Knex.js + node-oracledb" },
               { label: "Environment", value: process.env.NODE_ENV || "development" },
-              { label: "Approval Levels", value: "3 (Divisional → Functional → Country)" },
+              { label: "Approval Levels", value: "3 (Divisional/Country → Country Supervisor → Functional)" },
               { label: "Candidate Stages", value: "10 stages" },
             ].map(({ label, value }) => (
               <div key={label} className="flex justify-between border-b border-gray-50 pb-2">
@@ -108,9 +109,10 @@ export default async function SettingsPage() {
               { role: "ADMIN", perms: "Full access: users, MRFs, candidates, org, documents" },
               { role: "HR", perms: "Manage users, MRFs, candidates, documents, approvals" },
               { role: "BRANCH_MANAGER", perms: "Create MRFs, view candidates" },
-              { role: "DIVISIONAL_MANAGER", perms: "Approve/reject divisional MRFs" },
-              { role: "FUNCTIONAL_HEAD", perms: "Approve/reject functional MRFs" },
-              { role: "COUNTRY_MANAGER", perms: "Approve/reject country-level MRFs" },
+              { role: "DIVISIONAL_MANAGER", perms: "Approve/reject MRFs at stage 1 (org-scoped)" },
+              { role: "COUNTRY_MANAGER", perms: "Approve/reject MRFs at stage 1 (org-scoped)" },
+              { role: "COUNTRY_SUPERVISOR", perms: "Approve/reject MRFs at stage 2 (org-scoped)" },
+              { role: "FUNCTIONAL_HEAD", perms: "Approve/reject MRFs at stage 3 (department + org-scoped)" },
               { role: "CANDIDATE", perms: "View own application, upload documents (pre-shortlist)" },
             ].map(({ role: r, perms }) => (
               <div key={r} className="flex items-start gap-2">

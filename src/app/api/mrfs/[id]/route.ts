@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { toBool } from "@/lib/db-bool";
+import { toBool, fromBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath, getAccessibleOrgUnitIds } from "@/lib/org-access";
+import { isDesignatedApproverForStage } from "@/lib/mrf-approval";
 
 const MRF_BOOLEAN_FIELDS = ["isNewRole", "isBusinessExpansion", "isBudgeted", "contributionJustified"];
 
@@ -24,11 +25,28 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const orgUnits = await getAllOrgUnits();
   const orgUnitPath = getAncestorPath(mrf.orgUnitId, orgUnits);
 
-  const [department, designation, createdBy] = await Promise.all([
+  // Whether the requesting user is genuinely the designated approver for
+  // this MRF's current stage (org/department-scoped, excludes the ANY
+  // universal-approver bypass which the client already knows about from its
+  // own session) — drives whether the frontend shows the Approve button, so
+  // the two never fall out of sync the way a client-only approvalLevel
+  // check could (see src/lib/mrf-approval.ts).
+  const approvalLevel = (session.user as { approvalLevel?: string | null })?.approvalLevel ?? null;
+  const requestingUserId = (session.user as { id?: string })?.id!;
+  const canApprove = await isDesignatedApproverForStage(requestingUserId, approvalLevel as any, mrf);
+
+  const [department, designation, createdBy, heldBy] = await Promise.all([
     db("RECRUIT_T_Department").where({ id: mrf.departmentId }).first(),
     mrf.designationId ? db("RECRUIT_T_Designation").where({ id: mrf.designationId }).first() : null,
     db("RECRUIT_T_User").where({ id: mrf.createdById }).select("name", "email").first(),
+    mrf.heldById ? db("RECRUIT_T_User").where({ id: mrf.heldById }).select("name").first() : null,
   ]);
+
+  // Computed here (not left to the client) so "is this actually on hold
+  // right now" can't drift from what src/lib/mrf-reminders.ts uses to decide
+  // whether to send the next reminder.
+  const holdIndefinite = fromBool(mrf.holdIndefinite);
+  const isOnHold = holdIndefinite || (!!mrf.holdUntil && new Date(mrf.holdUntil).getTime() > Date.now());
 
   const approvalRecordsRaw = await db("RECRUIT_T_MRFApprovalRecord")
     .where({ mrfId: id })
@@ -83,6 +101,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     approvalRecords,
     candidates,
     documents,
+    canApprove,
+    isOnHold,
+    holdIndefinite,
+    heldBy: heldBy ? { name: heldBy.name } : null,
   });
 }
 

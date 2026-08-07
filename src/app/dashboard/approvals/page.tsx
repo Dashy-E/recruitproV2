@@ -28,6 +28,10 @@ interface MRF {
   createdBy: { name: string; email: string };
   approvalRecords: ApprovalRecord[];
   _count: { candidates: number };
+  // Server-computed org/department-scoped eligibility for the requesting
+  // user — see src/lib/mrf-approval.ts. Don't re-derive this from
+  // approvalLevel alone client-side; it needs the org/department checks too.
+  canApprove: boolean;
 }
 
 interface ApprovalRecord {
@@ -41,25 +45,19 @@ interface ApprovalRecord {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  PENDING_DIVISIONAL: "Pending Divisional Approval",
+  PENDING_DIVISIONAL: "Pending Divisional/Country Approval",
+  PENDING_COUNTRY_SUPERVISOR: "Pending Country Supervisor Approval",
   PENDING_FUNCTIONAL: "Pending Functional Approval",
-  PENDING_COUNTRY: "Pending Country Approval",
   APPROVED: "Approved",
   REJECTED: "Rejected",
 };
 
 const STATUS_COLORS: Record<string, string> = {
   PENDING_DIVISIONAL: "bg-yellow-100 text-yellow-800",
+  PENDING_COUNTRY_SUPERVISOR: "bg-blue-100 text-blue-800",
   PENDING_FUNCTIONAL: "bg-orange-100 text-orange-800",
-  PENDING_COUNTRY: "bg-blue-100 text-blue-800",
   APPROVED: "bg-green-100 text-green-800",
   REJECTED: "bg-red-100 text-red-800",
-};
-
-const STATUS_TO_LEVEL: Record<string, string> = {
-  PENDING_DIVISIONAL: "DIVISIONAL",
-  PENDING_FUNCTIONAL: "FUNCTIONAL",
-  PENDING_COUNTRY: "COUNTRY",
 };
 
 export default function ApprovalsPage() {
@@ -74,9 +72,10 @@ export default function ApprovalsPage() {
   const [filter, setFilter] = useState<"pending" | "all">("pending");
 
   // "ANY" is a universal approver (matches the old ADMIN/HR/COUNTRY_MANAGER
-  // bypass); other levels only act on the matching pending stage.
+  // bypass); other levels only act if the server says they're the genuinely
+  // designated (org/department-scoped) approver for that MRF's stage.
   const isUniversalApprover = approvalLevel === "ANY";
-  const canActOnStatus = (status: string) => isUniversalApprover || (!!approvalLevel && approvalLevel === STATUS_TO_LEVEL[status]);
+  const canActOnMrf = (m: MRF) => isUniversalApprover || m.canApprove;
 
   const fetchMRFs = () => {
     fetch("/api/mrfs")
@@ -86,9 +85,9 @@ export default function ApprovalsPage() {
 
   useEffect(() => { fetchMRFs(); }, []);
 
-  const ALL_PENDING = ["PENDING_DIVISIONAL", "PENDING_FUNCTIONAL", "PENDING_COUNTRY"];
+  const ALL_PENDING = ["PENDING_DIVISIONAL", "PENDING_COUNTRY_SUPERVISOR", "PENDING_FUNCTIONAL"];
 
-  const pendingMRFs = mrfs.filter((m) => ALL_PENDING.includes(m.status) && canActOnStatus(m.status));
+  const pendingMRFs = mrfs.filter((m) => ALL_PENDING.includes(m.status) && canActOnMrf(m));
 
   const displayMRFs = filter === "pending" ? pendingMRFs : mrfs.filter((m) => !["DRAFT"].includes(m.status));
 
@@ -157,7 +156,7 @@ export default function ApprovalsPage() {
       ) : (
         <div className="space-y-4">
           {displayMRFs.map((mrf) => {
-            const canAct = ALL_PENDING.includes(mrf.status) && canActOnStatus(mrf.status);
+            const canAct = ALL_PENDING.includes(mrf.status) && canActOnMrf(mrf);
 
             return (
               <Card key={mrf.id} className={`border-l-4 ${canAct ? "border-l-blue-500" : "border-l-gray-200"}`}>

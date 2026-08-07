@@ -40,9 +40,9 @@ export const CANDIDATE_STAGES = [
 
 export const MRF_STATUSES = {
   DRAFT: { label: "Draft", color: "bg-gray-100 text-gray-700" },
-  PENDING_DIVISIONAL: { label: "Pending Divisional Approval", color: "bg-yellow-100 text-yellow-700" },
+  PENDING_DIVISIONAL: { label: "Pending Divisional/Country Approval", color: "bg-yellow-100 text-yellow-700" },
+  PENDING_COUNTRY_SUPERVISOR: { label: "Pending Country Supervisor Approval", color: "bg-blue-100 text-blue-700" },
   PENDING_FUNCTIONAL: { label: "Pending Functional Approval", color: "bg-orange-100 text-orange-700" },
-  PENDING_COUNTRY: { label: "Pending Country Approval", color: "bg-blue-100 text-blue-700" },
   APPROVED: { label: "Approved", color: "bg-green-100 text-green-700" },
   REJECTED: { label: "Rejected", color: "bg-red-100 text-red-700" },
 } as const;
@@ -52,6 +52,7 @@ export const USER_ROLES = {
   HR: "HR",
   BRANCH_MANAGER: "Branch Manager",
   DIVISIONAL_MANAGER: "Divisional Manager",
+  COUNTRY_SUPERVISOR: "Country Supervisor",
   FUNCTIONAL_HEAD: "Functional Head",
   COUNTRY_MANAGER: "Country Manager",
   CANDIDATE: "Candidate",

@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (!key?.trim() || !label?.trim()) {
     return NextResponse.json({ error: "Key and label are required" }, { status: 400 });
   }
-  if (approvalLevel && !["DIVISIONAL", "FUNCTIONAL", "COUNTRY", "ANY"].includes(approvalLevel)) {
+  if (approvalLevel && !["DIVISIONAL", "FUNCTIONAL", "COUNTRY", "COUNTRY_SUPERVISOR", "ANY"].includes(approvalLevel)) {
     return NextResponse.json({ error: "Invalid approval level" }, { status: 400 });
   }
   const permissionKeys: string[] = Array.isArray(permissions) ? permissions : [];

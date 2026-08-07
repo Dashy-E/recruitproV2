@@ -19,15 +19,21 @@ export const APPROVAL_LEVELS = {
   DIVISIONAL: "Divisional",
   FUNCTIONAL: "Functional",
   COUNTRY: "Country",
+  COUNTRY_SUPERVISOR: "Country Supervisor",
   ANY: "Any level (universal approver)",
 } as const;
 
 export type ApprovalLevel = keyof typeof APPROVAL_LEVELS;
 
-export const STATUS_TO_APPROVAL_LEVEL: Record<string, ApprovalLevel> = {
-  PENDING_DIVISIONAL: "DIVISIONAL",
-  PENDING_FUNCTIONAL: "FUNCTIONAL",
-  PENDING_COUNTRY: "COUNTRY",
+// Stage 1 accepts either a Divisional Manager or a Country Manager (whoever
+// has org-unit access to the MRF's location gets to act); stage 2 is the new
+// Country Supervisor role; stage 3 (final) is the department-matched
+// Functional Head. See src/lib/mrf-approval.ts for the org/department checks
+// layered on top of this role-level gate.
+export const STATUS_TO_APPROVAL_LEVELS: Record<string, ApprovalLevel[]> = {
+  PENDING_DIVISIONAL: ["DIVISIONAL", "COUNTRY"],
+  PENDING_COUNTRY_SUPERVISOR: ["COUNTRY_SUPERVISOR"],
+  PENDING_FUNCTIONAL: ["FUNCTIONAL"],
 };
 
 interface SessionLike {

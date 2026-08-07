@@ -16,6 +16,7 @@ import { OrgUnitPicker, OrgTreeNode, buildOrgTree } from "@/components/org-unit-
 interface User {
   id: string; name: string; userName: string; email: string; role: string; isActive: boolean; createdAt: string;
   orgUnits: { id: string; name: string; path: string }[];
+  departmentId: string | null;
 }
 interface Department { id: string; name: string }
 interface Role { id: string; key: string; label: string; isSystem: boolean; isActive: boolean; approvalLevel: string | null; permissions: string[] }
@@ -25,8 +26,9 @@ const ROLE_COLORS: Record<string, string> = {
   HR: "bg-blue-100 text-blue-700",
   BRANCH_MANAGER: "bg-green-100 text-green-700",
   DIVISIONAL_MANAGER: "bg-yellow-100 text-yellow-700",
-  FUNCTIONAL_HEAD: "bg-orange-100 text-orange-700",
   COUNTRY_MANAGER: "bg-red-100 text-red-700",
+  COUNTRY_SUPERVISOR: "bg-teal-100 text-teal-700",
+  FUNCTIONAL_HEAD: "bg-orange-100 text-orange-700",
   CANDIDATE: "bg-gray-100 text-gray-700",
 };
 const DEFAULT_ROLE_COLOR = "bg-slate-100 text-slate-700";
@@ -35,8 +37,9 @@ const ROLE_HINTS: Record<string, string> = {
   HR: "Assign one or more org units (optional)",
   BRANCH_MANAGER: "Assign at least one org unit (required)",
   DIVISIONAL_MANAGER: "Assign one or more org units",
-  FUNCTIONAL_HEAD: "Assign a department, plus org units (optional)",
   COUNTRY_MANAGER: "Assign one or more org units",
+  COUNTRY_SUPERVISOR: "Assign one or more org units",
+  FUNCTIONAL_HEAD: "Assign a department, plus org units (required to approve)",
 };
 
 export default function UsersPage() {
@@ -59,7 +62,8 @@ export default function UsersPage() {
 
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({
-    name: "", userName: "", email: "", userRole: "", orgUnitIds: [] as string[], password: "", confirmPassword: "", isActive: true,
+    name: "", userName: "", email: "", userRole: "", orgUnitIds: [] as string[], departmentId: "",
+    password: "", confirmPassword: "", isActive: true,
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState("");
@@ -127,6 +131,7 @@ export default function UsersPage() {
     setEditForm({
       name: u.name, userName: u.userName, email: u.email, userRole: u.role,
       orgUnitIds: u.orgUnits.map((o) => o.id),
+      departmentId: u.departmentId || "",
       password: "", confirmPassword: "", isActive: u.isActive,
     });
     setEditError("");
@@ -142,6 +147,7 @@ export default function UsersPage() {
       email: editForm.email,
       userRole: editForm.userRole,
       isActive: editForm.isActive,
+      departmentId: editForm.userRole === "FUNCTIONAL_HEAD" ? editForm.departmentId : null,
     };
     if (editForm.password) payload.password = editForm.password;
     const [res] = await Promise.all([
@@ -170,6 +176,7 @@ export default function UsersPage() {
 
   const needsDept = form.userRole === "FUNCTIONAL_HEAD";
   const needsOrgUnit = form.userRole === "BRANCH_MANAGER";
+  const editNeedsDept = editForm.userRole === "FUNCTIONAL_HEAD";
 
   return (
     <div className="space-y-6">
@@ -289,7 +296,23 @@ export default function UsersPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {ROLE_HINTS[editForm.userRole] && (
+                <p className="text-xs text-gray-500">{ROLE_HINTS[editForm.userRole]}</p>
+              )}
             </div>
+
+            {editNeedsDept && (
+              <div className="space-y-1">
+                <Label>Department *</Label>
+                <Select value={editForm.departmentId} onValueChange={(v) => setEditForm({ ...editForm, departmentId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                  <SelectContent>
+                    {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">Determines which MRFs (by department) this Functional Head can approve.</p>
+              </div>
+            )}
 
             <div className="col-span-2 grid grid-cols-2 gap-x-6 border-t pt-4">
               <div className="space-y-1">
@@ -341,7 +364,8 @@ export default function UsersPage() {
               onClick={handleEdit}
               disabled={
                 !editForm.name || !editForm.userName || !editForm.email || editSubmitting ||
-                (!!editForm.password && (editForm.password.length < 6 || !editPasswordsMatch))
+                (!!editForm.password && (editForm.password.length < 6 || !editPasswordsMatch)) ||
+                (editNeedsDept && !editForm.departmentId)
               }
             >
               {editSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}

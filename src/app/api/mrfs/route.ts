@@ -7,8 +7,10 @@ import { toBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath, getAccessibleOrgUnitIds, expandDescendantsSync } from "@/lib/org-access";
 import { generateReferenceNumber } from "@/lib/mrf-number";
+import { getEligibleApprovers, isDesignatedApproverForStage } from "@/lib/mrf-approval";
+import { ApprovalLevel, STATUS_TO_APPROVAL_LEVELS } from "@/lib/permissions";
 
-async function attachRelations(mrfs: any[]) {
+async function attachRelations(mrfs: any[], requestingUserId: string, requestingApprovalLevel: ApprovalLevel | null) {
   if (!mrfs.length) return [];
   const ids = mrfs.map((m) => m.id);
   const departmentIds = [...new Set(mrfs.map((m) => m.departmentId).filter(Boolean))];
@@ -25,6 +27,18 @@ async function attachRelations(mrfs: any[]) {
       db("RECRUIT_T_Candidate").whereIn("mrfId", ids).groupBy("mrfId").select("mrfId").count({ count: "*" }),
     ]);
 
+  // Only bother with the org/department-scoped DB check (isDesignatedApproverForStage)
+  // for MRFs where the user's role-level even matches the stage — cheap
+  // in-memory filter first so a big list doesn't fire one query per row.
+  const canApproveById = new Map<string, boolean>();
+  await Promise.all(
+    mrfs
+      .filter((m) => !!requestingApprovalLevel && (STATUS_TO_APPROVAL_LEVELS[m.status] || []).includes(requestingApprovalLevel))
+      .map(async (m) => {
+        canApproveById.set(m.id, await isDesignatedApproverForStage(requestingUserId, requestingApprovalLevel, m));
+      })
+  );
+
   return mrfs.map((m) => {
     const path = getAncestorPath(m.orgUnitId, orgUnits);
     return {
@@ -40,6 +54,7 @@ async function attachRelations(mrfs: any[]) {
       _count: {
         candidates: Number(candidateCounts.find((c: any) => c.mrfId === m.id)?.count || 0),
       },
+      canApprove: canApproveById.get(m.id) ?? false,
     };
   });
 }
@@ -60,14 +75,27 @@ export async function GET(req: NextRequest) {
     allowedIds = accessibleIds ? accessibleIds.filter((id) => scoped.has(id)) : [...scoped];
   }
 
+  // Select only what the list view needs — RECRUIT_T_MRF carries several
+  // CLOB columns (justification, rejectionReason, etc.) that aren't rendered
+  // in list views, and fetching them under concurrent load has been
+  // triggering an intermittent Oracle thin-driver LOB error ("lobImpl.getType
+  // is not a function"). The detail endpoint (GET /api/mrfs/[id]) still
+  // fetches full rows since those fields are shown there.
   const mrfs = await db("RECRUIT_T_MRF")
+    .select(
+      "id", "referenceNumber", "mrfNumber", "title", "status", "vacancyCount",
+      "orgUnitId", "departmentId", "designationId", "createdById", "createdAt"
+    )
     .modify((qb: any) => {
       if (status) qb.where({ status });
       if (allowedIds) qb.whereIn("orgUnitId", allowedIds);
     })
     .orderBy("createdAt", "desc");
 
-  return NextResponse.json(await attachRelations(mrfs));
+  const userId = (session.user as { id?: string })?.id!;
+  const approvalLevel = ((session.user as { approvalLevel?: string | null })?.approvalLevel ?? null) as ApprovalLevel | null;
+
+  return NextResponse.json(await attachRelations(mrfs, userId, approvalLevel));
 }
 
 export async function POST(req: NextRequest) {
@@ -154,8 +182,17 @@ export async function POST(req: NextRequest) {
       contributionJustified: toBool(body.contributionJustified),
       fillerName: body.fillerName || null,
       fillerDesignation: body.fillerDesignation || null,
+      // Printed on the requisition PDF's "Divisional Head" signature block
+      // in place of that static label (see mrf-pdf-document.tsx) — entered
+      // here at creation, not tied to any actual digital approval record.
+      approvalSignatureName: body.approvalSignatureName || null,
+      approvalSignatureDesignation: body.approvalSignatureDesignation || null,
       createdAt: now,
       updatedAt: now,
+      // Stage-1 approvers are notified below, right at creation — the 3-day
+      // reminder clock (src/lib/mrf-reminders.ts) starts from here, not from
+      // whenever the query happens to run.
+      lastReminderSentAt: now,
     })
     .returning("*");
 
@@ -173,12 +210,12 @@ export async function POST(req: NextRequest) {
     createdBy: creator ? { name: creator.name } : null,
   };
 
-  // Notify Divisional Managers that a new MRF needs approval
-  const divisionalManagers = await db("RECRUIT_T_User")
-    .where({ role: "DIVISIONAL_MANAGER", isActive: 1 })
-    .select("id");
+  // Notify stage-1 approvers (Divisional or Country Manager) whose org-unit
+  // assignment covers this MRF's org unit — same eligibility rules used to
+  // authorize the approval itself (see src/lib/mrf-approval.ts).
+  const scopedManagers = await getEligibleApprovers({ orgUnitId, departmentId }, ["DIVISIONAL", "COUNTRY"]);
   await Promise.all(
-    divisionalManagers.map((mgr: any) =>
+    scopedManagers.map((mgr: any) =>
       db("RECRUIT_T_Notification").insert({
         id: newId(),
         userId: mgr.id,

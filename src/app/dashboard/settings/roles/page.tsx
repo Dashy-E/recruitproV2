@@ -30,8 +30,9 @@ const NO_APPROVAL_LEVEL = "NONE";
 const APPROVAL_LEVELS = [
   { value: NO_APPROVAL_LEVEL, label: "None — doesn't approve MRFs" },
   { value: "DIVISIONAL", label: "Divisional" },
-  { value: "FUNCTIONAL", label: "Functional" },
   { value: "COUNTRY", label: "Country" },
+  { value: "COUNTRY_SUPERVISOR", label: "Country Supervisor" },
+  { value: "FUNCTIONAL", label: "Functional" },
   { value: "ANY", label: "Any level (universal approver)" },
 ];
 

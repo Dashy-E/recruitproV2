@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
     root: __dirname,
   },
   serverExternalPackages: ["knex", "oracledb"],
+  devIndicators: false,
 };
 
 export default nextConfig;

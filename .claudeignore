@@ -1,0 +1,14 @@
+.env
+.env.*
+*.env
+
+# Ignore secrets
+secrets/
+credentials.json
+
+# Ignore virtual env
+venv/
+__pycache__/
+
+# Ignore node modules
+node_modules/

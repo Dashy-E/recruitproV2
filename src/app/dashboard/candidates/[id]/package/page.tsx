@@ -31,9 +31,9 @@ interface PackageData {
 }
 
 const LEVEL_LABELS: Record<string, string> = {
-  DIVISIONAL_MANAGER: "Divisional Manager",
+  DIVISIONAL_MANAGER: "Divisional / Country Manager",
+  COUNTRY_SUPERVISOR: "Country Supervisor",
   FUNCTIONAL_HEAD: "Functional Head",
-  COUNTRY_MANAGER: "Country Manager",
 };
 
 export default function CandidatePackagePage() {

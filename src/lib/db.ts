@@ -21,7 +21,13 @@ function createDb() {
       password: process.env.DB_PASSWORD,
       connectString,
     },
-    pool: { min: 2, max: 10 },
+    // min == max: opening an Oracle connection over the network costs
+    // ~100-900ms (auth + session setup), while an already-open connection
+    // answers a simple query in ~15-60ms. Nearly every page here fires
+    // several parallel API requests, so a low min forced the pool to pay
+    // that connection-open cost mid-burst on almost every navigation —
+    // keeping all 10 warm from startup eliminates that stall.
+    pool: { min: 10, max: 10 },
   });
 }
 

@@ -102,7 +102,7 @@ CREATE TABLE "RECRUIT_T_Role" (
     CONSTRAINT "Role_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "Role_isSystem_chk" CHECK ("isSystem" IN (0,1)),
     CONSTRAINT "Role_isActive_chk" CHECK ("isActive" IN (0,1)),
-    CONSTRAINT "Role_approvalLevel_chk" CHECK ("approvalLevel" IN ('DIVISIONAL','FUNCTIONAL','COUNTRY','ANY'))
+    CONSTRAINT "Role_approvalLevel_chk" CHECK ("approvalLevel" IN ('DIVISIONAL','FUNCTIONAL','COUNTRY','COUNTRY_SUPERVISOR','ANY'))
 );
 -- A genuine UNIQUE constraint (not just a unique index) is required here —
 -- Oracle's ADD FOREIGN KEY refuses to reference a column backed only by a
@@ -157,6 +157,11 @@ CREATE TABLE "RECRUIT_T_MRF" (
     "justification"              CLOB,
     "fillerName"                 VARCHAR2(255),
     "fillerDesignation"          VARCHAR2(255),
+    -- Printed on the requisition PDF in place of the "Divisional Head"
+    -- signature block — entered at creation time rather than pulled from
+    -- the actual digital approval record (see mrf-pdf-document.tsx).
+    "approvalSignatureName"        VARCHAR2(255),
+    "approvalSignatureDesignation" VARCHAR2(255),
     "status"                     VARCHAR2(50)  DEFAULT 'DRAFT' NOT NULL,
     "createdById"                VARCHAR2(30)  NOT NULL,
     "createdAt"                  TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
@@ -187,11 +192,21 @@ CREATE TABLE "RECRUIT_T_MRF" (
     "industryBackground"         VARCHAR2(500),
     "otherSpecs"                 CLOB,
     "contributionJustified"      NUMBER(1)     DEFAULT 0 NOT NULL,
+    -- Reminder hold ("snooze"): pauses the every-3-days reminder email/notification
+    -- to the current stage's approver(s) without blocking Approve/Reject, which
+    -- stays available the whole time. holdIndefinite=1 ("until I change") ignores
+    -- holdUntil entirely; otherwise the hold auto-lifts once holdUntil passes.
+    "holdUntil"                  TIMESTAMP,
+    "holdIndefinite"             NUMBER(1)     DEFAULT 0 NOT NULL,
+    "heldById"                   VARCHAR2(30),
+    "heldAt"                     TIMESTAMP,
+    "lastReminderSentAt"         TIMESTAMP,
     CONSTRAINT "MRF_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "MRF_isNewRole_chk" CHECK ("isNewRole" IN (0,1)),
     CONSTRAINT "MRF_isBusinessExpansion_chk" CHECK ("isBusinessExpansion" IN (0,1)),
     CONSTRAINT "MRF_isBudgeted_chk" CHECK ("isBudgeted" IN (0,1)),
-    CONSTRAINT "MRF_contributionJustified_chk" CHECK ("contributionJustified" IN (0,1))
+    CONSTRAINT "MRF_contributionJustified_chk" CHECK ("contributionJustified" IN (0,1)),
+    CONSTRAINT "MRF_holdIndefinite_chk" CHECK ("holdIndefinite" IN (0,1))
 );
 
 CREATE TABLE "RECRUIT_T_Candidate" (
@@ -419,6 +434,8 @@ ALTER TABLE "RECRUIT_T_MRF" ADD CONSTRAINT "MRF_designationId_fkey"
     FOREIGN KEY ("designationId") REFERENCES "RECRUIT_T_Designation"("id") ON DELETE SET NULL;
 ALTER TABLE "RECRUIT_T_MRF" ADD CONSTRAINT "MRF_createdById_fkey"
     FOREIGN KEY ("createdById") REFERENCES "RECRUIT_T_User"("id");
+ALTER TABLE "RECRUIT_T_MRF" ADD CONSTRAINT "MRF_heldById_fkey"
+    FOREIGN KEY ("heldById") REFERENCES "RECRUIT_T_User"("id") ON DELETE SET NULL;
 
 ALTER TABLE "RECRUIT_T_Candidate" ADD CONSTRAINT "Candidate_userId_fkey"
     FOREIGN KEY ("userId") REFERENCES "RECRUIT_T_User"("id");

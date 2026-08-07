@@ -9,11 +9,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ArrowLeft, CheckCircle, XCircle, Clock, Users, Loader2, Send, RefreshCw, Pencil, FileText } from "lucide-react";
 import { formatDate, MRF_STATUSES, CANDIDATE_STAGES } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 import { MRFPdfPreview } from "@/components/mrf-pdf-preview";
+import { toast } from "@/hooks/use-toast";
 
 interface MRFDetail {
   id: string; referenceNumber: string; mrfNumber: string | null; title: string; status: string;
@@ -36,6 +38,18 @@ interface MRFDetail {
   createdBy: { name: string; email: string };
   approvalRecords: ApprovalRecord[];
   candidates: CandidateSummary[];
+  // Server-computed: is the requesting user genuinely the designated
+  // approver for this MRF's current stage (org/department-scoped)? See
+  // src/lib/mrf-approval.ts — kept server-side so the Approve button can't
+  // drift out of sync with what the approve endpoint will actually allow.
+  canApprove: boolean;
+  // Reminder hold ("snooze") — pauses the every-3-days reminder email to the
+  // current approver without blocking Approve/Reject. See
+  // src/lib/mrf-reminders.ts and /api/mrfs/[id]/hold.
+  isOnHold: boolean;
+  holdUntil: string | null;
+  holdIndefinite: boolean;
+  heldBy: { name: string } | null;
 }
 
 interface ApprovalRecord {
@@ -48,21 +62,19 @@ interface CandidateSummary {
   currentStage: string; aiScore: number | null;
 }
 
+// level here is the stage-grouping key stored on RECRUIT_T_MRFApprovalRecord
+// (see LEVEL_LABEL in approve/route.ts) — stage 1's label is generic since
+// either a Divisional or a Country Manager may have actually approved it
+// (the record's own approverRole shows who really acted).
 const APPROVAL_LEVELS = [
-  { key: "DIVISIONAL_MANAGER", label: "Divisional Manager", pendingStatus: "PENDING_DIVISIONAL" },
+  { key: "DIVISIONAL_MANAGER", label: "Divisional / Country Manager", pendingStatus: "PENDING_DIVISIONAL" },
+  { key: "COUNTRY_SUPERVISOR", label: "Country Supervisor", pendingStatus: "PENDING_COUNTRY_SUPERVISOR" },
   { key: "FUNCTIONAL_HEAD", label: "Functional Head", pendingStatus: "PENDING_FUNCTIONAL" },
-  { key: "COUNTRY_MANAGER", label: "Country Manager", pendingStatus: "PENDING_COUNTRY" },
 ];
 
-const STATUS_TO_LEVEL: Record<string, string> = {
-  PENDING_DIVISIONAL: "DIVISIONAL",
-  PENDING_FUNCTIONAL: "FUNCTIONAL",
-  PENDING_COUNTRY: "COUNTRY",
-};
-
 const NEXT_LEVEL_LABEL: Record<string, string> = {
+  PENDING_COUNTRY_SUPERVISOR: "Country Supervisor",
   PENDING_FUNCTIONAL: "Functional Head",
-  PENDING_COUNTRY: "Country Manager",
 };
 
 export default function MRFDetailPage() {
@@ -98,6 +110,14 @@ export default function MRFDetailPage() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [postApprovalStatus, setPostApprovalStatus] = useState("");
+  const [eligibleApprovers, setEligibleApprovers] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [loadingApprovers, setLoadingApprovers] = useState(false);
+  // Lets the sender correct the email inline if the selected approver's
+  // address on file is wrong, instead of being locked to the dropdown value.
+  const [editingApproverEmail, setEditingApproverEmail] = useState(false);
+
+  // Reminder hold ("snooze") state
+  const [holding, setHolding] = useState(false);
 
   // Restart approval dialog (for REJECTED MRFs)
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
@@ -110,7 +130,7 @@ export default function MRFDetailPage() {
   const canManageMrf = permissions.includes("MANAGE_MRF");
   const canSendApprovalEmail = permissions.includes("SEND_MRF_APPROVAL_EMAIL");
   const isUniversalApprover = approvalLevel === "ANY";
-  const isManagerForThisLevel = mrf ? !!approvalLevel && approvalLevel === STATUS_TO_LEVEL[mrf.status] : false;
+  const isManagerForThisLevel = !!mrf?.canApprove;
   const canAct = (isUniversalApprover || isManagerForThisLevel) && mrf?.status?.startsWith("PENDING");
   const isManagerSelfApproval = isManagerForThisLevel && !isUniversalApprover;
   const canSubmitApproval = isManagerSelfApproval ? true : !!approverName;
@@ -122,6 +142,20 @@ export default function MRFDetailPage() {
   };
 
   useEffect(() => { fetchMRF(); }, [id]);
+
+  // Who's eligible to act at the MRF's current pending stage — same
+  // org/department-scoped rules used to pick auto-notification recipients,
+  // surfaced here so "send to next approver" is a dropdown, not free text.
+  useEffect(() => {
+    if (!sendNextOpen) return;
+    setLoadingApprovers(true);
+    setNextApproverEmail("");
+    setEditingApproverEmail(false);
+    fetch(`/api/mrfs/${id}/eligible-approvers`)
+      .then((r) => r.json())
+      .then((d) => setEligibleApprovers(Array.isArray(d) ? d : []))
+      .finally(() => setLoadingApprovers(false));
+  }, [sendNextOpen, id]);
 
   const openApprovalDialog = (action: "approve" | "reject") => {
     setApproverName(session?.user?.name || "");
@@ -168,6 +202,7 @@ export default function MRFDetailPage() {
     if (res.ok) {
       setSendNextOpen(false);
       setNextApproverEmail(""); setNextApproverMessage("");
+      toast({ variant: "success", title: "Email sent", description: `Notification sent to ${nextApproverEmail}.` });
     } else {
       const data = await res.json().catch(() => ({}));
       setSendError(data.error || "Failed to send email.");
@@ -179,6 +214,25 @@ export default function MRFDetailPage() {
     await fetch(`/api/mrfs/${id}/restart`, { method: "POST" });
     setRestarting(false);
     setRestartConfirmOpen(false);
+    fetchMRF();
+  };
+
+  const handleHoldSelect = async (value: string) => {
+    setHolding(true);
+    const body = value === "indefinite" ? { indefinite: true } : { durationDays: parseInt(value, 10) };
+    await fetch(`/api/mrfs/${id}/hold`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setHolding(false);
+    fetchMRF();
+  };
+
+  const handleReleaseHold = async () => {
+    setHolding(true);
+    await fetch(`/api/mrfs/${id}/hold`, { method: "DELETE" });
+    setHolding(false);
     fetchMRF();
   };
 
@@ -201,6 +255,13 @@ export default function MRFDetailPage() {
             <span className={`rounded-full px-3 py-1 text-xs font-medium ${statusInfo?.color}`}>
               {statusInfo?.label || mrf.status}
             </span>
+            {mrf.isOnHold && (
+              <span className="rounded-full px-3 py-1 text-xs font-medium bg-purple-100 text-purple-700 flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                On hold{mrf.heldBy ? ` by ${mrf.heldBy.name}` : ""}
+                {mrf.holdIndefinite ? " until changed" : mrf.holdUntil ? ` until ${formatDate(mrf.holdUntil)}` : ""}
+              </span>
+            )}
           </div>
           <p className="text-sm text-gray-500 font-mono mt-1">
             Ref: {mrf.referenceNumber}
@@ -225,6 +286,33 @@ export default function MRFDetailPage() {
           )}
           {canAct && (
             <>
+              {mrf.isOnHold ? (
+                <Button
+                  variant="outline"
+                  onClick={handleReleaseHold}
+                  disabled={holding}
+                  className="text-purple-600 border-purple-200 hover:bg-purple-50"
+                >
+                  {holding && <Loader2 className="h-4 w-4 animate-spin" />}
+                  <Clock className="h-4 w-4" /> Release Hold
+                </Button>
+              ) : (
+                <Select value="" onValueChange={handleHoldSelect} disabled={holding}>
+                  <SelectTrigger className="w-auto text-purple-600 border-purple-200">
+                    <Clock className="h-4 w-4" />
+                    <SelectValue placeholder="Hold" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Hold 1 day</SelectItem>
+                    <SelectItem value="15">Hold 15 days</SelectItem>
+                    <SelectItem value="30">Hold 1 month</SelectItem>
+                    <SelectItem value="90">Hold 3 months</SelectItem>
+                    <SelectItem value="180">Hold 6 months</SelectItem>
+                    <SelectItem value="365">Hold 1 year</SelectItem>
+                    <SelectItem value="indefinite">Hold until I change</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
               <Button variant="outline" onClick={() => openApprovalDialog("reject")} className="text-red-600 border-red-200 hover:bg-red-50">
                 <XCircle className="h-4 w-4" /> Reject
               </Button>
@@ -472,13 +560,47 @@ export default function MRFDetailPage() {
               Send them an email with the direct MRF link.
             </div>
             <div className="space-y-2">
-              <Label>Approver Email *</Label>
-              <Input
-                type="email"
-                placeholder="next.approver@company.com"
-                value={nextApproverEmail}
-                onChange={(e) => setNextApproverEmail(e.target.value)}
-              />
+              <div className="flex items-center justify-between">
+                <Label>Approver *</Label>
+                {!loadingApprovers && eligibleApprovers.length > 0 && (
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    onClick={() => setEditingApproverEmail((v) => !v)}
+                  >
+                    <Pencil className="h-3 w-3" />
+                    {editingApproverEmail ? "Choose from list" : "Wrong email? Edit"}
+                  </button>
+                )}
+              </div>
+              {loadingApprovers ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500 py-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading eligible approvers…
+                </div>
+              ) : eligibleApprovers.length > 0 && !editingApproverEmail ? (
+                <Select value={nextApproverEmail} onValueChange={setNextApproverEmail}>
+                  <SelectTrigger><SelectValue placeholder="Select an approver" /></SelectTrigger>
+                  <SelectContent>
+                    {eligibleApprovers.map((a) => (
+                      <SelectItem key={a.id} value={a.email}>{a.name} — {a.email}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <>
+                  {eligibleApprovers.length === 0 && (
+                    <p className="text-xs text-amber-600">
+                      No eligible approver found with org/department access for this stage — enter an email manually.
+                    </p>
+                  )}
+                  <Input
+                    type="email"
+                    placeholder="next.approver@company.com"
+                    value={nextApproverEmail}
+                    onChange={(e) => setNextApproverEmail(e.target.value)}
+                  />
+                </>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Message (optional)</Label>

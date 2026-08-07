@@ -25,12 +25,20 @@ export default async function DashboardPage() {
     count("RECRUIT_T_Candidate"),
     count("RECRUIT_T_MRF", { status: "APPROVED" }),
     db("RECRUIT_T_MRF")
-      .whereIn("status", ["PENDING_DIVISIONAL", "PENDING_FUNCTIONAL", "PENDING_COUNTRY"])
+      .whereIn("status", ["PENDING_DIVISIONAL", "PENDING_COUNTRY_SUPERVISOR", "PENDING_FUNCTIONAL"])
       .count<{ count: string }[]>("* as count")
       .then((r) => Number(r[0].count)),
   ]);
 
-  const recentMRFsRaw = await db("RECRUIT_T_MRF").orderBy("createdAt", "desc").limit(5);
+  // Select only what this card renders — RECRUIT_T_MRF carries several CLOB
+  // columns (justification, rejectionReason, etc.) that aren't needed here,
+  // and fetching them under concurrent load has been triggering an
+  // intermittent Oracle thin-driver LOB error ("lobImpl.getType is not a
+  // function") on this page's parallel queries.
+  const recentMRFsRaw = await db("RECRUIT_T_MRF")
+    .select("id", "title", "mrfNumber", "referenceNumber", "status", "orgUnitId", "departmentId", "createdAt")
+    .orderBy("createdAt", "desc")
+    .limit(5);
   const departmentIds = [...new Set(recentMRFsRaw.map((m: any) => m.departmentId).filter(Boolean))];
   const createdByIds = [...new Set(recentMRFsRaw.map((m: any) => m.createdById).filter(Boolean))];
   const [departmentsForRecent, creatorsForRecent, orgUnitsForRecent] = await Promise.all([

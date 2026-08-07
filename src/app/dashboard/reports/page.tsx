@@ -31,7 +31,7 @@ export default async function ReportsPage() {
     count("RECRUIT_T_MRF", { status: "APPROVED" }),
     count("RECRUIT_T_MRF", { status: "REJECTED" }),
     db("RECRUIT_T_MRF")
-      .whereIn("status", ["PENDING_DIVISIONAL", "PENDING_FUNCTIONAL", "PENDING_COUNTRY"])
+      .whereIn("status", ["PENDING_DIVISIONAL", "PENDING_COUNTRY_SUPERVISOR", "PENDING_FUNCTIONAL"])
       .count<{ count: string }[]>("* as count")
       .then((r) => Number(r[0].count)),
     count("RECRUIT_T_Candidate"),
@@ -177,7 +177,7 @@ export default async function ReportsPage() {
                 key === "APPROVED" ? approvedMRFs :
                 key === "REJECTED" ? rejectedMRFs :
                 key === "DRAFT" ? totalMRFs - approvedMRFs - rejectedMRFs - pendingMRFs :
-                key === "PENDING_DIVISIONAL" || key === "PENDING_FUNCTIONAL" || key === "PENDING_COUNTRY"
+                key === "PENDING_DIVISIONAL" || key === "PENDING_COUNTRY_SUPERVISOR" || key === "PENDING_FUNCTIONAL"
                   ? pendingMRFs / 3 : 0;
               return (
                 <div key={key} className={`flex items-center gap-3 rounded-lg px-4 py-3 ${val.color}`}>

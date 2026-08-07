@@ -64,3 +64,44 @@ export function getAncestorPath(unitId: string, units: OrgUnitRow[]): OrgUnitRow
   }
   return path;
 }
+
+// Whether a single user's org-unit assignment covers targetOrgUnitId (or one
+// of its descendants is the target — i.e. the user manages targetOrgUnitId
+// or an ancestor of it). No assignment at all means unrestricted (true).
+export async function userHasOrgAccess(userId: string, targetOrgUnitId: string): Promise<boolean> {
+  const [user] = await filterUsersByOrgAccess([{ id: userId }], targetOrgUnitId);
+  return !!user;
+}
+
+// Narrows a candidate recipient list to users whose org-unit assignment
+// covers targetOrgUnitId — i.e. the user manages targetOrgUnitId or one of
+// its ancestors. Users with no org-unit assignment are unrestricted (same
+// convention as getAccessibleOrgUnitIds) and always pass. Used to scope
+// MRF notifications to the org structure instead of blasting every user
+// with a matching role.
+export async function filterUsersByOrgAccess<T extends { id: string }>(
+  candidates: T[],
+  targetOrgUnitId: string
+): Promise<T[]> {
+  if (candidates.length === 0) return [];
+
+  const units = await getAllOrgUnits();
+  const ancestorIds = new Set(getAncestorPath(targetOrgUnitId, units).map((u) => u.id));
+
+  const assignments = await db("RECRUIT_T_UserOrgUnit")
+    .whereIn("userId", candidates.map((c) => c.id))
+    .select("userId", "orgUnitId");
+
+  const assignedByUser = new Map<string, string[]>();
+  for (const a of assignments) {
+    const list = assignedByUser.get(a.userId) ?? [];
+    list.push(a.orgUnitId);
+    assignedByUser.set(a.userId, list);
+  }
+
+  return candidates.filter((c) => {
+    const assigned = assignedByUser.get(c.id);
+    if (!assigned || assigned.length === 0) return true; // unrestricted
+    return assigned.some((id) => ancestorIds.has(id));
+  });
+}

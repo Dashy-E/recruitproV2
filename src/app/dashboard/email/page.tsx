@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Mail, Plus, Loader2, ClipboardList, Search } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { toast } from "@/hooks/use-toast";
 
 interface MRFOption {
   id: string;
@@ -53,7 +54,7 @@ export default function EmailPage() {
       .then((d) => {
         if (Array.isArray(d)) {
           setMrfs(d.filter((m: MRFOption) =>
-            ["PENDING_DIVISIONAL", "PENDING_FUNCTIONAL", "PENDING_COUNTRY"].includes(m.status)
+            ["PENDING_DIVISIONAL", "PENDING_COUNTRY_SUPERVISOR", "PENDING_FUNCTIONAL"].includes(m.status)
           ));
         }
       });
@@ -79,6 +80,7 @@ export default function EmailPage() {
     setSubmitting(false);
     if (res.ok) {
       setShowCompose(false);
+      toast({ variant: "success", title: "Email sent", description: `Sent to ${form.toEmail}.` });
       setForm({ toEmail: "", subject: "", body: "", mrfId: "" });
       setMrfSearch("");
       fetchEmails();
@@ -115,9 +117,9 @@ export default function EmailPage() {
   const [showMrfDropdown, setShowMrfDropdown] = useState(false);
 
   const STATUS_LABELS: Record<string, string> = {
-    PENDING_DIVISIONAL: "Pending Divisional",
+    PENDING_DIVISIONAL: "Pending Divisional/Country",
+    PENDING_COUNTRY_SUPERVISOR: "Pending Country Supervisor",
     PENDING_FUNCTIONAL: "Pending Functional",
-    PENDING_COUNTRY: "Pending Country",
   };
 
   return (

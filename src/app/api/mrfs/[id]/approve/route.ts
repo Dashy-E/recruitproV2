@@ -3,22 +3,26 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
-import { STATUS_TO_APPROVAL_LEVEL, ApprovalLevel } from "@/lib/permissions";
+import { STATUS_TO_APPROVAL_LEVELS, ApprovalLevel } from "@/lib/permissions";
+import { isDesignatedApproverForStage, getEligibleApprovers } from "@/lib/mrf-approval";
 import { generateMRFNumber } from "@/lib/mrf-number";
 import nodemailer from "nodemailer";
 
 const STATUS_FLOW: Record<string, string> = {
-  PENDING_DIVISIONAL: "PENDING_FUNCTIONAL",
-  PENDING_FUNCTIONAL: "PENDING_COUNTRY",
-  PENDING_COUNTRY: "APPROVED",
+  PENDING_DIVISIONAL: "PENDING_COUNTRY_SUPERVISOR",
+  PENDING_COUNTRY_SUPERVISOR: "PENDING_FUNCTIONAL",
+  PENDING_FUNCTIONAL: "APPROVED",
 };
 
-// Display label stored on the approval record / used in notification text —
-// unrelated to the approvalLevel permission enum used for authorization below.
+// Display/grouping label stored on the approval record — represents the
+// STAGE, not the specific role that acted (stage 1 accepts either a
+// Divisional or a Country Manager; approverRole below records who actually
+// approved). Unrelated to the approvalLevel permission enum used for
+// authorization below.
 const LEVEL_LABEL: Record<string, string> = {
   PENDING_DIVISIONAL: "DIVISIONAL_MANAGER",
+  PENDING_COUNTRY_SUPERVISOR: "COUNTRY_SUPERVISOR",
   PENDING_FUNCTIONAL: "FUNCTIONAL_HEAD",
-  PENDING_COUNTRY: "COUNTRY_MANAGER",
 };
 
 async function sendApprovalEmail(toEmail: string, toName: string, referenceNumber: string, mrfTitle: string) {
@@ -80,9 +84,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   // "ANY" is a universal approver (matches the old isAdminOrHR / COUNTRY_MANAGER
   // bypass in one rule); otherwise the role's approvalLevel must match the
-  // MRF's current pending stage.
+  // MRF's current pending stage AND the user must have org-unit access to the
+  // MRF's location (and, for Functional Head, be the registered head of the
+  // MRF's department) — see src/lib/mrf-approval.ts.
   const isUniversalApprover = approvalLevel === "ANY";
-  const isManagerForThisLevel = !!approvalLevel && approvalLevel === STATUS_TO_APPROVAL_LEVEL[mrf.status];
+  const isManagerForThisLevel = await isDesignatedApproverForStage(userId, approvalLevel, mrf);
 
   if (!isUniversalApprover && !isManagerForThisLevel) {
     return NextResponse.json({ error: "You are not authorized to approve this MRF at its current stage" }, { status: 403 });
@@ -123,22 +129,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           updatedAt: now,
           ...(approvedAt ? { approvedAt } : {}),
           ...(assignedMrfNumber ? { mrfNumber: assignedMrfNumber } : {}),
+          // A hold belongs to whoever placed it at the stage they were
+          // deciding on — once that stage clears, a different person is
+          // responsible next, so any leftover hold shouldn't silently mute
+          // their reminders too. The stage-1 notification below resets the
+          // 3-day reminder clock for the new stage's approver(s).
+          ...(!isFinalApproval
+            ? { lastReminderSentAt: now, holdUntil: null, holdIndefinite: 0, heldById: null, heldAt: null }
+            : {}),
         });
     });
 
     // Notifications and emails are non-fatal — DB changes above are already committed
     try {
       if (nextStatus !== "APPROVED") {
-        const nextLevel = STATUS_TO_APPROVAL_LEVEL[nextStatus];
-        // Notify every active user whose role approves at this level, or is a
-        // universal ("ANY") approver.
-        const recipients = await db("RECRUIT_T_User as u")
-          .join("RECRUIT_T_Role as r", "r.key", "u.role")
-          .where("u.isActive", 1)
-          .where((qb) => {
-            qb.where("r.approvalLevel", nextLevel).orWhere("r.approvalLevel", "ANY");
-          })
-          .select("u.id", "u.email", "u.name");
+        // Notify every active user eligible to act at the next stage — same
+        // org/department eligibility rules as the authorization check above.
+        const recipients = await getEligibleApprovers(mrf, STATUS_TO_APPROVAL_LEVELS[nextStatus] || []);
 
         await Promise.all(recipients.map(async (approver: any) => {
           await createNotification(
