@@ -55,6 +55,7 @@ interface MRFDetail {
 interface ApprovalRecord {
   id: string; level: string; approverName: string; approverDesignation: string | null;
   status: string; notes: string | null; recordedAt: string;
+  isAutoApproved: boolean;
   approver: { name: string; signatureUrl: string | null } | null;
 }
 

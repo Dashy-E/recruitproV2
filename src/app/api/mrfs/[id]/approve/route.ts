@@ -4,26 +4,14 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { STATUS_TO_APPROVAL_LEVELS, ApprovalLevel } from "@/lib/permissions";
-import { isDesignatedApproverForStage, getEligibleApprovers } from "@/lib/mrf-approval";
+import {
+  isDesignatedApproverForStage,
+  getEligibleApprovers,
+  STATUS_FLOW,
+  STAGE_LEVEL_LABEL as LEVEL_LABEL,
+} from "@/lib/mrf-approval";
 import { generateMRFNumber } from "@/lib/mrf-number";
 import nodemailer from "nodemailer";
-
-const STATUS_FLOW: Record<string, string> = {
-  PENDING_DIVISIONAL: "PENDING_COUNTRY_SUPERVISOR",
-  PENDING_COUNTRY_SUPERVISOR: "PENDING_FUNCTIONAL",
-  PENDING_FUNCTIONAL: "APPROVED",
-};
-
-// Display/grouping label stored on the approval record — represents the
-// STAGE, not the specific role that acted (stage 1 accepts either a
-// Divisional or a Country Manager; approverRole below records who actually
-// approved). Unrelated to the approvalLevel permission enum used for
-// authorization below.
-const LEVEL_LABEL: Record<string, string> = {
-  PENDING_DIVISIONAL: "DIVISIONAL_MANAGER",
-  PENDING_COUNTRY_SUPERVISOR: "COUNTRY_SUPERVISOR",
-  PENDING_FUNCTIONAL: "FUNCTIONAL_HEAD",
-};
 
 async function sendApprovalEmail(toEmail: string, toName: string, referenceNumber: string, mrfTitle: string) {
   if (!process.env.SMTP_HOST) return;

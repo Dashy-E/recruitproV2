@@ -68,6 +68,10 @@ export interface MRFPdfData {
     approverName: string;
     recordedAt: string;
     status: string;
+    // True for a hierarchy-skip auto-approval (the creator outranked this
+    // stage), false for a genuine approval action — the "Divisional Head"
+    // signature line only reflects genuine approvals, see below.
+    isAutoApproved?: boolean;
     approver?: { name: string; signatureUrl: string | null } | null;
   }[];
 }
@@ -206,8 +210,11 @@ export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
   // Stage 1 accepts either a Divisional or a Country Manager (see
   // src/lib/permissions.ts) — LEVEL_LABEL in approve/route.ts groups both
   // under the same "DIVISIONAL_MANAGER" record level, so whichever of the
-  // two actually approved is who shows up here.
-  const divisionalRecord = mrf.approvalRecords.find((r) => r.level === "DIVISIONAL_MANAGER" && r.status === "APPROVED");
+  // two actually approved is who shows up here. Auto-approved (hierarchy
+  // skip) records are excluded — this line should only reflect a genuine
+  // approval action, falling back to the typed "Approval Signature" name
+  // (or blank) otherwise, per the user's explicit request.
+  const divisionalRecord = mrf.approvalRecords.find((r) => r.level === "DIVISIONAL_MANAGER" && r.status === "APPROVED" && !r.isAutoApproved);
   const divisionalApproverName = divisionalRecord?.approverName || null;
   const divisionalSignatureUrl = divisionalRecord?.approver?.signatureUrl || null;
 

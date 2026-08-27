@@ -59,6 +59,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   ]);
   const approvalRecords = approvalRecordsRaw.map((r: any) => ({
     ...r,
+    isAutoApproved: fromBool(r.isAutoApproved),
     approver: r.approverId ? (() => {
       const a = approvers.find((x: any) => x.id === r.approverId);
       return a ? { name: a.name, signatureUrl: a.signatureUrl || null } : null;
@@ -92,8 +93,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     })(),
   }));
 
+  // Oracle has no native boolean type — these columns come back as raw
+  // NUMBER(1) (0/1), not real booleans, so anything doing a strict ===
+  // true/false comparison downstream (e.g. the PDF's Budgeted Y/N
+  // checkboxes) would never match. isBudgeted is nullable/tri-state
+  // (unset/true/false), so null must stay null rather than collapse to false.
+  const booleanFields: Record<string, boolean | null> = {};
+  for (const field of MRF_BOOLEAN_FIELDS) {
+    booleanFields[field] = mrf[field] === null || mrf[field] === undefined ? null : fromBool(mrf[field]);
+  }
+
   return NextResponse.json({
     ...mrf,
+    ...booleanFields,
     orgUnit: orgUnitPath.length ? { id: mrf.orgUnitId, name: orgUnitPath.at(-1)!.name, path: orgUnitPath.map((p) => p.name).join(" / ") } : null,
     department,
     designation,

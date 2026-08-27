@@ -6,8 +6,8 @@ import { newId } from "@/lib/id";
 import { toBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath, getAccessibleOrgUnitIds, expandDescendantsSync } from "@/lib/org-access";
-import { generateReferenceNumber } from "@/lib/mrf-number";
-import { getEligibleApprovers, isDesignatedApproverForStage } from "@/lib/mrf-approval";
+import { generateReferenceNumber, generateMRFNumber } from "@/lib/mrf-number";
+import { getEligibleApprovers, isDesignatedApproverForStage, computeInitialMrfState, insertAutoApprovalRecords, STAGE_LEVEL_LABEL } from "@/lib/mrf-approval";
 import { ApprovalLevel, STATUS_TO_APPROVAL_LEVELS } from "@/lib/permissions";
 
 async function attachRelations(mrfs: any[], requestingUserId: string, requestingApprovalLevel: ApprovalLevel | null) {
@@ -103,6 +103,9 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const userId = (session.user as { id?: string })?.id;
+  const userRole = (session.user as { role?: string })?.role || "";
+  const userName = session.user?.name || "Unknown";
+  const approvalLevel = (session.user as { approvalLevel?: ApprovalLevel | null })?.approvalLevel ?? null;
   if (!hasPermission(session, "CREATE_MRF")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -141,12 +144,21 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   const id = newId();
 
+  // Hierarchy-based self-approval skip: a creator who already outranks a
+  // stage doesn't need sign-off from it — see computeInitialMrfState in
+  // src/lib/mrf-approval.ts. Unranked creators (HR/Branch Manager/Admin/etc.)
+  // get the unchanged full chain starting at PENDING_DIVISIONAL.
+  const { status: initialStatus, skippedStages } = computeInitialMrfState(approvalLevel);
+  const isImmediatelyApproved = initialStatus === "APPROVED";
+  const assignedMrfNumber = isImmediatelyApproved ? await generateMRFNumber() : null;
+
   const [mrf] = await db("RECRUIT_T_MRF")
     .insert({
       id,
       // referenceNumber identifies the MRF from creation onward; mrfNumber
       // is a separate sequence assigned only once this MRF clears final
-      // approval (see approve/route.ts).
+      // approval (see approve/route.ts) — or immediately here, if the
+      // creator's own seniority skips every stage.
       referenceNumber: await generateReferenceNumber(),
       title,
       orgUnitId,
@@ -154,7 +166,8 @@ export async function POST(req: NextRequest) {
       designationId: designationId || null,
       vacancyCount: vacancyCount || 1,
       justification,
-      status: "PENDING_DIVISIONAL",
+      status: initialStatus,
+      ...(isImmediatelyApproved ? { mrfNumber: assignedMrfNumber, approvedAt: now } : {}),
       createdById: userId!,
       // Extended MRF fields
       vacancyType: body.vacancyType || null,
@@ -196,6 +209,11 @@ export async function POST(req: NextRequest) {
     })
     .returning("*");
 
+  // Record the hierarchy skip as real approval-record rows so the Approval
+  // Progress timeline and PDF signature blocks show it correctly (both
+  // already key off RECRUIT_T_MRFApprovalRecord generically).
+  await insertAutoApprovalRecords(db, id, skippedStages, { id: userId!, name: userName, role: userRole });
+
   const [department, creator] = await Promise.all([
     db("RECRUIT_T_Department").where({ id: departmentId }).first(),
     db("RECRUIT_T_User").where({ id: userId }).select("name").first(),
@@ -210,23 +228,26 @@ export async function POST(req: NextRequest) {
     createdBy: creator ? { name: creator.name } : null,
   };
 
-  // Notify stage-1 approvers (Divisional or Country Manager) whose org-unit
-  // assignment covers this MRF's org unit — same eligibility rules used to
-  // authorize the approval itself (see src/lib/mrf-approval.ts).
-  const scopedManagers = await getEligibleApprovers({ orgUnitId, departmentId }, ["DIVISIONAL", "COUNTRY"]);
-  await Promise.all(
-    scopedManagers.map((mgr: any) =>
-      db("RECRUIT_T_Notification").insert({
-        id: newId(),
-        userId: mgr.id,
-        type: "MRF_APPROVAL",
-        title: `New MRF ${mrf.referenceNumber} requires your approval`,
-        message: `"${mrf.title}" has been submitted and is awaiting divisional approval.`,
-        link: `/dashboard/approvals`,
-        createdAt: now,
-      })
-    )
-  );
+  // Notify whoever the chain actually starts at (may not be stage 1, if the
+  // creator's own seniority skipped ahead) — same eligibility rules used to
+  // authorize the approval itself (see src/lib/mrf-approval.ts). Nothing to
+  // notify if the creator's seniority skipped every stage.
+  if (!isImmediatelyApproved) {
+    const scopedManagers = await getEligibleApprovers({ orgUnitId, departmentId }, STATUS_TO_APPROVAL_LEVELS[initialStatus] || []);
+    await Promise.all(
+      scopedManagers.map((mgr: any) =>
+        db("RECRUIT_T_Notification").insert({
+          id: newId(),
+          userId: mgr.id,
+          type: "MRF_APPROVAL",
+          title: `New MRF ${mrf.referenceNumber} requires your approval`,
+          message: `"${mrf.title}" has been submitted and is awaiting ${(STAGE_LEVEL_LABEL[initialStatus] || "").replace(/_/g, " ")} approval.`,
+          link: `/dashboard/approvals`,
+          createdAt: now,
+        })
+      )
+    );
+  }
 
   return NextResponse.json(mrfWithRelations, { status: 201 });
 }

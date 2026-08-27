@@ -264,7 +264,15 @@ CREATE TABLE "RECRUIT_T_MRFApprovalRecord" (
     "recordedById"        VARCHAR2(30)  NOT NULL,
     "recordedAt"          TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     "documentId"          VARCHAR2(30),
-    CONSTRAINT "MRFApprovalRecord_pkey" PRIMARY KEY ("id")
+    -- Set for hierarchy-skip records inserted by insertAutoApprovalRecords
+    -- (src/lib/mrf-approval.ts) — distinguishes "creator outranks this stage"
+    -- from a genuine approval action, so PDF signature lines (which should
+    -- only reflect a real approver, falling back to blank otherwise) can
+    -- tell the two apart. The in-app Approval Progress timeline still shows
+    -- both, since its notes text already self-explains the auto-approval.
+    "isAutoApproved"      NUMBER(1)     DEFAULT 0 NOT NULL,
+    CONSTRAINT "MRFApprovalRecord_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "MRFApprovalRecord_isAutoApproved_chk" CHECK ("isAutoApproved" IN (0,1))
 );
 
 CREATE TABLE "RECRUIT_T_CandidateStageHistory" (

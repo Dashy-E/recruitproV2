@@ -1,10 +1,97 @@
 import { db } from "@/lib/db";
+import { newId } from "@/lib/id";
 import { ApprovalLevel, STATUS_TO_APPROVAL_LEVELS } from "@/lib/permissions";
 import { filterUsersByOrgAccess, userHasOrgAccess } from "@/lib/org-access";
 
 async function isDepartmentFunctionalHead(userId: string, departmentId: string): Promise<boolean> {
   const row = await db("RECRUIT_T_DepartmentFunctionalHead").where({ userId, departmentId }).first();
   return !!row;
+}
+
+// Single source of truth for the stage sequence — shared by the approve
+// endpoint and by creation/restart (which need to know the order to compute
+// hierarchy-based skips, see computeInitialMrfState below).
+export const MRF_STAGE_ORDER = ["PENDING_DIVISIONAL", "PENDING_COUNTRY_SUPERVISOR", "PENDING_FUNCTIONAL"] as const;
+
+export const STATUS_FLOW: Record<string, string> = {
+  PENDING_DIVISIONAL: "PENDING_COUNTRY_SUPERVISOR",
+  PENDING_COUNTRY_SUPERVISOR: "PENDING_FUNCTIONAL",
+  PENDING_FUNCTIONAL: "APPROVED",
+};
+
+// Display/grouping label stored on RECRUIT_T_MRFApprovalRecord.level — the
+// STAGE, not the specific role that acted (stage 1 accepts either a
+// Divisional or a Country Manager; approverRole separately records who
+// actually approved/auto-approved).
+export const STAGE_LEVEL_LABEL: Record<string, string> = {
+  PENDING_DIVISIONAL: "DIVISIONAL_MANAGER",
+  PENDING_COUNTRY_SUPERVISOR: "COUNTRY_SUPERVISOR",
+  PENDING_FUNCTIONAL: "FUNCTIONAL_HEAD",
+};
+
+// Organizational seniority for creation-time self-approval skipping — a
+// Country Supervisor outranks stage 1, a Functional Head outranks
+// everything. ANY and unranked levels (HR/ADMIN/Branch Manager/etc.) rank 0,
+// meaning no skipping (unchanged full chain starting at stage 1).
+const HIERARCHY_RANK: Partial<Record<ApprovalLevel, number>> = {
+  DIVISIONAL: 1,
+  COUNTRY: 1,
+  COUNTRY_SUPERVISOR: 2,
+  FUNCTIONAL: 3,
+};
+
+const STAGE_RANK: Record<string, number> = {
+  PENDING_DIVISIONAL: 1,
+  PENDING_COUNTRY_SUPERVISOR: 2,
+  PENDING_FUNCTIONAL: 3,
+};
+
+export interface InitialMrfState {
+  status: string; // one of MRF_STAGE_ORDER, or "APPROVED" if every stage was skipped
+  skippedStages: string[]; // subset of MRF_STAGE_ORDER, in order
+}
+
+// Where a new (or restarted) MRF should enter the approval chain, given the
+// approvalLevel of whoever is raising it — stages at or below their own
+// hierarchy rank are skipped (self-approved), since a more senior person
+// doesn't need sign-off from an equal-or-lower rank. Used at creation
+// (src/app/api/mrfs/route.ts) and restart (src/app/api/mrfs/[id]/restart/route.ts).
+export function computeInitialMrfState(creatorApprovalLevel: ApprovalLevel | null): InitialMrfState {
+  const rank = (creatorApprovalLevel && HIERARCHY_RANK[creatorApprovalLevel]) || 0;
+  if (rank === 0) return { status: MRF_STAGE_ORDER[0], skippedStages: [] };
+
+  const skippedStages = MRF_STAGE_ORDER.filter((s) => STAGE_RANK[s] <= rank);
+  const remaining = MRF_STAGE_ORDER.filter((s) => STAGE_RANK[s] > rank);
+  return { status: remaining[0] || "APPROVED", skippedStages };
+}
+
+// Records the hierarchy-based skip as real approval-record rows (not a
+// special-cased flag), so the existing Approval Progress timeline and PDF
+// signature blocks — which both key off RECRUIT_T_MRFApprovalRecord — render
+// them correctly with no changes needed there.
+export async function insertAutoApprovalRecords(
+  dbOrTrx: typeof db,
+  mrfId: string,
+  skippedStages: string[],
+  actor: { id: string; name: string; role: string }
+): Promise<void> {
+  if (skippedStages.length === 0) return;
+  const now = new Date();
+  await dbOrTrx("RECRUIT_T_MRFApprovalRecord").insert(
+    skippedStages.map((stage) => ({
+      id: newId(),
+      mrfId,
+      level: STAGE_LEVEL_LABEL[stage],
+      approverRole: actor.role,
+      approverName: actor.name,
+      approverId: actor.id,
+      status: "APPROVED",
+      notes: "Auto-approved — raised by the approver themselves, who outranks this stage.",
+      recordedById: actor.id,
+      recordedAt: now,
+      isAutoApproved: 1,
+    }))
+  );
 }
 
 // Single source of truth for "can this user act on this MRF right now" —
