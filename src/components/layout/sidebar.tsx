@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import {
   LayoutDashboard, FileText, Users, Building2, Globe, Settings,
-  LogOut, ChevronDown, ChevronRight, ClipboardList, BarChart3, FolderOpen, UserCheck, Mail, ShieldCheck
+  LogOut, ChevronDown, ChevronRight, ClipboardList, BarChart3, FolderOpen, UserCheck, Mail, ShieldCheck, X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { sessionFlags } from "@/lib/session-flags";
@@ -176,7 +176,7 @@ const navItems: NavItem[] = [
   },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const { data: session } = useSession();
@@ -228,10 +228,20 @@ export default function Sidebar() {
   };
 
   return (
-    <div className="flex h-full w-64 flex-col bg-gray-900 text-white">
-      <div className="flex h-16 items-center gap-2 border-b border-gray-700 px-6">
-        <Globe className="h-6 w-6 text-blue-400" />
-        <span className="text-lg font-bold">RecruitPro ERP</span>
+    <div
+      className={cn(
+        "fixed inset-y-0 left-0 z-50 flex h-full w-64 flex-col bg-gray-900 text-white transform transition-transform duration-200 md:relative md:z-auto md:translate-x-0",
+        isOpen ? "translate-x-0" : "-translate-x-full"
+      )}
+    >
+      <div className="flex h-16 items-center justify-between gap-2 border-b border-gray-700 px-6">
+        <div className="flex items-center gap-2">
+          <Globe className="h-6 w-6 text-blue-400" />
+          <span className="text-lg font-bold">RecruitPro ERP</span>
+        </div>
+        <button onClick={onClose} className="p-1 text-gray-400 hover:text-white md:hidden">
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
@@ -255,7 +265,7 @@ export default function Sidebar() {
                         isActive ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
                       )}
                     >
-                      <Link href={item.href} className="flex flex-1 items-center gap-3 px-3 py-2">
+                      <Link href={item.href} onClick={onClose} className="flex flex-1 items-center gap-3 px-3 py-2">
                         <Icon className="h-4 w-4" />
                         <span className="flex-1 text-left">{item.label}</span>
                       </Link>
@@ -290,6 +300,7 @@ export default function Sidebar() {
                           <li key={child.href}>
                             <Link
                               href={child.href}
+                              onClick={onClose}
                               className={cn(
                                 "block rounded-md px-3 py-1.5 text-sm transition-colors",
                                 pathname === child.href
@@ -307,6 +318,7 @@ export default function Sidebar() {
                 ) : (
                   <Link
                     href={item.href}
+                    onClick={onClose}
                     className={cn(
                       "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
                       isActive ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
@@ -328,13 +340,20 @@ export default function Sidebar() {
       </nav>
 
       <div className="border-t border-gray-700 p-4">
-        <div className="mb-3 px-3">
+        <Link
+          href="/dashboard/profile"
+          onClick={onClose}
+          className={cn(
+            "mb-3 block rounded-md px-3 py-2 -mx-3 transition-colors hover:bg-gray-800",
+            pathname === "/dashboard/profile" && "bg-gray-800"
+          )}
+        >
           <p className="text-sm font-medium text-white">{session?.user?.name}</p>
           <p className="text-xs text-gray-400">{session?.user?.email}</p>
           <span className="mt-1 inline-block rounded-full bg-blue-600/30 px-2 py-0.5 text-xs text-blue-300">
             {role.replace(/_/g, " ")}
           </span>
-        </div>
+        </Link>
         <button
           onClick={handleSignOut}
           className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"

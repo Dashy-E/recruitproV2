@@ -56,16 +56,12 @@ export interface MRFPdfData {
   designation: { title: string } | null;
   fillerName?: string | null;
   fillerDesignation?: string | null;
-  // Optional static designation label for the "Divisional Head" signature
-  // block header — entered at creation. Falls back to "Divisional Head"
-  // until an actual Divisional/Country Manager approval exists; once it
-  // does, that approver's uploaded signature/name takes over the slot.
-  approvalSignatureName?: string | null;
-  approvalSignatureDesignation?: string | null;
   createdBy?: { name: string; email: string; signatureUrl?: string | null } | null;
   approvalRecords: {
     level: string;
     approverName: string;
+    approverRole?: string | null;
+    approverDesignation?: string | null;
     recordedAt: string;
     status: string;
     // True for a hierarchy-skip auto-approval (the creator outranked this
@@ -104,7 +100,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
 
-  row: { flexDirection: "row", marginBottom: 5, alignItems: "flex-end" },
+  row: { flexDirection: "row", marginBottom: 3, alignItems: "flex-end" },
   spaceBetween: { justifyContent: "space-between" },
   field: { flexDirection: "row", flex: 1, alignItems: "flex-end" },
   label: { marginRight: 4, color: MUTED },
@@ -138,17 +134,18 @@ const styles = StyleSheet.create({
   },
   sentenceText: { flex: 1, paddingRight: 12, color: INK },
 
-  divider: { borderBottom: `0.75pt solid ${RULE}`, marginVertical: 7 },
+  divider: { borderBottom: `0.75pt solid ${RULE}`, marginVertical: 3 },
   sigBlock: { flex: 1, marginRight: 16 },
-  sigHead: { fontSize: 9, fontWeight: 700, color: MUTED, marginBottom: 10 },
-  // marginTop is blank room for an actual pen signature above the line —
-  // deliberately generous, unlike the tighter spacing used elsewhere on the
-  // page. Skipped when an uploaded signature image already fills that role.
-  sigLine: { borderTop: `0.75pt solid ${INK}`, marginTop: 16, paddingTop: 3, fontSize: 8.5 },
-  sigLineWithImage: { borderTop: `0.75pt solid ${INK}`, marginTop: 2, paddingTop: 3, fontSize: 8.5 },
-  signatureImage: { width: 130, height: 42, objectFit: "contain", marginTop: 4 },
+  sigHead: { fontSize: 9, fontWeight: 700, color: MUTED, marginBottom: 4 },
+  // Fixed-height reserved space above the ruled line, whether or not an
+  // uploaded signature image actually fills it — so a block's total height
+  // (and the gap after the row it's in) stays the same regardless of
+  // approval state, instead of shrinking whenever a stage is still blank.
+  sigImageSlot: { height: 46, justifyContent: "flex-end" },
+  sigLine: { borderTop: `0.75pt solid ${INK}`, marginTop: 2, paddingTop: 3, fontSize: 8.5 },
+  signatureImage: { width: 130, height: 42, objectFit: "contain" },
 
-  footer: { marginTop: 10, fontSize: 7.5, color: MUTED, textAlign: "center" },
+  footer: { marginTop: 5, fontSize: 7.5, color: MUTED, textAlign: "center" },
 });
 
 // labelWidth pins the label column to a fixed width so that stacked rows in
@@ -202,21 +199,37 @@ function SentenceCheckbox({ text, checked }: { text: string; checked: boolean })
   );
 }
 
+// One half of a signature row — optional uploaded signature image (in a
+// fixed-height slot so blank and filled blocks are the same total height),
+// and the name-designation on a single ruled line below it.
+function SignatureBlock({ signatureUrl, name, designation }: { signatureUrl?: string | null; name?: string | null; designation?: string | null }) {
+  return (
+    <View style={styles.sigBlock}>
+      <View style={styles.sigImageSlot}>
+        {signatureUrl && <Image src={signatureUrl} style={styles.signatureImage} />}
+      </View>
+      <Text style={styles.sigLine}>{sigNameLine(name, designation)}</Text>
+    </View>
+  );
+}
+
 export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
   const rootOrgName = mrf.orgUnit?.path?.split(" / ")[0] || mrf.orgUnit?.name || "";
 
   const creatorSignatureUrl = mrf.createdBy?.signatureUrl || null;
 
-  // Stage 1 accepts either a Divisional or a Country Manager (see
-  // src/lib/permissions.ts) — LEVEL_LABEL in approve/route.ts groups both
-  // under the same "DIVISIONAL_MANAGER" record level, so whichever of the
-  // two actually approved is who shows up here. Auto-approved (hierarchy
-  // skip) records are excluded — this line should only reflect a genuine
-  // approval action, falling back to the typed "Approval Signature" name
-  // (or blank) otherwise, per the user's explicit request.
-  const divisionalRecord = mrf.approvalRecords.find((r) => r.level === "DIVISIONAL_MANAGER" && r.status === "APPROVED" && !r.isAutoApproved);
-  const divisionalApproverName = divisionalRecord?.approverName || null;
-  const divisionalSignatureUrl = divisionalRecord?.approver?.signatureUrl || null;
+  // One signature slot per approval stage (see MRF_STAGE_ORDER/STAGE_LEVEL_LABEL
+  // in src/lib/mrf-approval.ts). Auto-approved (hierarchy skip) and skipped
+  // (permission-based skip) records are excluded — each line should only
+  // reflect a genuine approval action, staying blank otherwise.
+  function stageSignature(level: string) {
+    const record = mrf.approvalRecords.find((r) => r.level === level && r.status === "APPROVED" && !r.isAutoApproved);
+    const designation = record?.approverDesignation || (record?.approverRole ? record.approverRole.replace(/_/g, " ") : null);
+    return { approverName: record?.approverName || null, designation, signatureUrl: record?.approver?.signatureUrl || null };
+  }
+  const divisional = stageSignature("DIVISIONAL_MANAGER");
+  const countrySupervisor = stageSignature("COUNTRY_SUPERVISOR");
+  const functionalHead = stageSignature("FUNCTIONAL_HEAD");
 
   return (
     <Document>
@@ -335,32 +348,34 @@ export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
         <View style={styles.divider} />
 
         <View style={styles.row}>
-          <Text style={[styles.sigHead, { flex: 1 }]}>Branch/ Departmental Head</Text>
-          <Text style={[styles.sigHead, { flex: 1 }]}>{mrf.approvalSignatureDesignation || "Divisional Head"}</Text>
+          <Text style={[styles.sigHead, { flex: 1 }]}>Raised By</Text>
+          <Text style={[styles.sigHead, { flex: 1 }]}>Divisional/ Country Manager</Text>
         </View>
         <View style={styles.row}>
-          <View style={styles.sigBlock}>
-            {creatorSignatureUrl && <Image src={creatorSignatureUrl} style={styles.signatureImage} />}
-            <Text style={creatorSignatureUrl ? styles.sigLineWithImage : styles.sigLine}>
-              {fillerLine(mrf.fillerName, mrf.fillerDesignation)}
-            </Text>
-          </View>
-          <View style={styles.sigBlock}>
-            {divisionalSignatureUrl && <Image src={divisionalSignatureUrl} style={styles.signatureImage} />}
-            <Text style={divisionalSignatureUrl ? styles.sigLineWithImage : styles.sigLine}>
-              {divisionalApproverName || mrf.approvalSignatureName || " "}
-            </Text>
-          </View>
+          <SignatureBlock signatureUrl={creatorSignatureUrl} name={mrf.fillerName} designation={mrf.fillerDesignation} />
+          <SignatureBlock signatureUrl={divisional.signatureUrl} name={divisional.approverName} designation={divisional.designation} />
         </View>
 
-        <View style={[styles.row, styles.spaceBetween, { marginTop: 18, alignItems: "flex-start" }]}>
-          <View style={[styles.checkboxGroup, { marginTop: 14 }]}>
+        <View style={[styles.row, { marginTop: 8 }]}>
+          <Text style={[styles.sigHead, { flex: 1 }]}>Country Supervisor</Text>
+          <Text style={[styles.sigHead, { flex: 1 }]}>Functional Head</Text>
+        </View>
+        <View style={styles.row}>
+          <SignatureBlock signatureUrl={countrySupervisor.signatureUrl} name={countrySupervisor.approverName} designation={countrySupervisor.designation} />
+          <SignatureBlock signatureUrl={functionalHead.signatureUrl} name={functionalHead.approverName} designation={functionalHead.designation} />
+        </View>
+
+        <View style={[styles.row, styles.spaceBetween, { marginTop: 4, alignItems: "flex-start" }]}>
+          <View style={[styles.checkboxGroup, { marginTop: 20 }]}>
             <Text style={styles.rowLabel}>Sanctioned</Text>
             <Checkbox label="Y" checked={mrf.status === "APPROVED"} />
             <Checkbox label="N" checked={mrf.status === "REJECTED"} />
           </View>
+          {/* Managing Director always signs by hand, unlike the other slots
+              above which can carry an uploaded signature image — this blank
+              stays extra generous to leave real room for a pen signature. */}
           <View style={{ flex: 1, marginLeft: 20 }}>
-            <Text style={styles.sigLine}> </Text>
+            <Text style={[styles.sigLine, { marginTop: 28 }]}> </Text>
             <Text style={[styles.sigHead, { marginTop: 3, marginBottom: 0 }]}>Managing Director</Text>
           </View>
         </View>
@@ -382,4 +397,9 @@ function formatReplacementReason(reason?: string | null) {
 function fillerLine(name?: string | null, designation?: string | null) {
   if (!name) return " ";
   return designation ? `${name} — ${designation}` : name;
+}
+
+function sigNameLine(name?: string | null, designation?: string | null) {
+  if (!name) return " ";
+  return designation ? `${name}-${designation}` : name;
 }

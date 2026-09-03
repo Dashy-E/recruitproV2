@@ -10,20 +10,28 @@ import { generateReferenceNumber, generateMRFNumber } from "@/lib/mrf-number";
 import { getEligibleApprovers, isDesignatedApproverForStage, computeInitialMrfState, insertAutoApprovalRecords, STAGE_LEVEL_LABEL } from "@/lib/mrf-approval";
 import { ApprovalLevel, STATUS_TO_APPROVAL_LEVELS } from "@/lib/permissions";
 
-async function attachRelations(mrfs: any[], requestingUserId: string, requestingApprovalLevel: ApprovalLevel | null) {
+async function attachRelations(mrfs: any[], requestingUserId: string, requestingApprovalLevel: ApprovalLevel | null, includeApprovalRecords: boolean) {
   if (!mrfs.length) return [];
   const ids = mrfs.map((m) => m.id);
   const departmentIds = [...new Set(mrfs.map((m) => m.departmentId).filter(Boolean))];
   const designationIds = [...new Set(mrfs.map((m) => m.designationId).filter(Boolean))];
   const createdByIds = [...new Set(mrfs.map((m) => m.createdById).filter(Boolean))];
 
+  // approvalRecords carries a CLOB (notes) column — fetching it under
+  // concurrent load has triggered an intermittent Oracle thin-driver LOB
+  // error (see the non-CLOB select below). Only the Approvals page actually
+  // renders approval notes; every other consumer of this list endpoint
+  // (MRFs list, Email, Candidates) never reads .approvalRecords at all, so
+  // skip the join for them entirely rather than fetching data nobody uses.
   const [orgUnits, departments, designations, creators, approvalRecords, candidateCounts] =
     await Promise.all([
       getAllOrgUnits(),
       db("RECRUIT_T_Department").whereIn("id", departmentIds),
       db("RECRUIT_T_Designation").whereIn("id", designationIds),
       db("RECRUIT_T_User").whereIn("id", createdByIds).select("id", "name", "email"),
-      db("RECRUIT_T_MRFApprovalRecord").whereIn("mrfId", ids).orderBy("recordedAt", "desc"),
+      includeApprovalRecords
+        ? db("RECRUIT_T_MRFApprovalRecord").whereIn("mrfId", ids).orderBy("recordedAt", "desc")
+        : Promise.resolve([]),
       db("RECRUIT_T_Candidate").whereIn("mrfId", ids).groupBy("mrfId").select("mrfId").count({ count: "*" }),
     ]);
 
@@ -94,8 +102,9 @@ export async function GET(req: NextRequest) {
 
   const userId = (session.user as { id?: string })?.id!;
   const approvalLevel = ((session.user as { approvalLevel?: string | null })?.approvalLevel ?? null) as ApprovalLevel | null;
+  const includeApprovalRecords = searchParams.get("includeApprovalRecords") === "1";
 
-  return NextResponse.json(await attachRelations(mrfs, userId, approvalLevel));
+  return NextResponse.json(await attachRelations(mrfs, userId, approvalLevel, includeApprovalRecords));
 }
 
 export async function POST(req: NextRequest) {

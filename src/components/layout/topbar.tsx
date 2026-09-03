@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Bell, CheckCheck, ExternalLink } from "lucide-react";
+import { Bell, CheckCheck, ExternalLink, Menu } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { formatDate } from "@/lib/utils";
 
@@ -33,9 +33,10 @@ const pageTitles: Record<string, string> = {
   "/dashboard/employee-portal": "Employee Portal",
   "/dashboard/employees": "Employees",
   "/dashboard/email": "Email",
+  "/dashboard/profile": "My Profile",
 };
 
-export default function Topbar() {
+export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const pathname = usePathname();
   const { data: session } = useSession();
   const title = pageTitles[pathname] || "RecruitPro ERP";
@@ -88,9 +89,17 @@ export default function Topbar() {
   };
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-gray-200 bg-white px-6">
-      <h1 className="text-xl font-semibold text-gray-900">{title}</h1>
-      <div className="flex items-center gap-4">
+    <header className="flex h-16 items-center justify-between gap-2 border-b border-gray-200 bg-white px-4 md:px-6">
+      <div className="flex min-w-0 items-center gap-2">
+        <button
+          onClick={onMenuClick}
+          className="shrink-0 rounded-md p-2 text-gray-500 hover:bg-gray-100 md:hidden"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <h1 className="truncate text-lg font-semibold text-gray-900 md:text-xl">{title}</h1>
+      </div>
+      <div className="flex items-center gap-2 shrink-0 md:gap-4">
         {/* Notification Bell */}
         <div className="relative" ref={panelRef}>
           <button
@@ -162,9 +171,13 @@ export default function Topbar() {
         </div>
 
         {/* User avatar */}
-        <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-medium">
+        <Link
+          href="/dashboard/profile"
+          className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+          title="My Profile"
+        >
           {session?.user?.name?.[0]?.toUpperCase() || "U"}
-        </div>
+        </Link>
       </div>
     </header>
   );

@@ -23,6 +23,7 @@ const PERMISSIONS: Record<string, string> = {
   CREATE_MRF: "Create MRFs",
   MANAGE_MRF: "Edit / Restart MRFs",
   SEND_MRF_APPROVAL_EMAIL: "Send MRF Approval Emails",
+  SKIP_MRF_APPROVAL: "Skip MRF Approval Level",
 };
 
 const NO_APPROVAL_LEVEL = "NONE";
@@ -103,12 +104,17 @@ export default function RolesSettingsPage() {
     if (!editRole) return;
     setEditError("");
     setEditSubmitting(true);
+    // The Admin role's name/approval level stay locked server-side — sending
+    // them at all (even unchanged) is rejected, so omit them entirely here.
+    const isAdminRole = editRole.key === "ADMIN";
     const res = await fetch(`/api/roles/${editRole.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        label: editForm.label,
-        approvalLevel: editForm.approvalLevel === NO_APPROVAL_LEVEL ? null : editForm.approvalLevel,
+        ...(isAdminRole ? {} : {
+          label: editForm.label,
+          approvalLevel: editForm.approvalLevel === NO_APPROVAL_LEVEL ? null : editForm.approvalLevel,
+        }),
         permissions: editForm.permissions,
       }),
     });
@@ -205,7 +211,7 @@ export default function RolesSettingsPage() {
                       >
                         <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${role.isActive ? "translate-x-4" : "translate-x-0.5"}`} />
                       </button>
-                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => openEdit(role)} disabled={role.key === "ADMIN"}>
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => openEdit(role)}>
                         <Pencil className="h-3.5 w-3.5 text-gray-400" />
                       </Button>
                       <Button
@@ -281,9 +287,19 @@ export default function RolesSettingsPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Edit Role — {editRole?.label}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
+            {editRole?.key === "ADMIN" && (
+              <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800">
+                Permissions are editable, but the Admin role's name, approval level, and active status stay locked, and MANAGE_ROLES can't be removed — otherwise nobody could return here to undo a mistake.
+              </div>
+            )}
             <div className="space-y-1">
               <Label>Label *</Label>
-              <Input value={editForm.label} onChange={(e) => setEditForm({ ...editForm, label: e.target.value })} />
+              <Input
+                value={editForm.label}
+                onChange={(e) => setEditForm({ ...editForm, label: e.target.value })}
+                disabled={editRole?.key === "ADMIN"}
+                className={editRole?.key === "ADMIN" ? "opacity-60" : ""}
+              />
             </div>
             <div className="space-y-1">
               <Label>Key</Label>
@@ -291,7 +307,11 @@ export default function RolesSettingsPage() {
             </div>
             <div className="space-y-1">
               <Label>MRF Approval Level</Label>
-              <Select value={editForm.approvalLevel} onValueChange={(v) => setEditForm({ ...editForm, approvalLevel: v })}>
+              <Select
+                value={editForm.approvalLevel}
+                onValueChange={(v) => setEditForm({ ...editForm, approvalLevel: v })}
+                disabled={editRole?.key === "ADMIN"}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {APPROVAL_LEVELS.map((l) => <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>)}
@@ -301,17 +321,21 @@ export default function RolesSettingsPage() {
             <div className="space-y-2">
               <Label>Permissions</Label>
               <div className="grid grid-cols-2 gap-2">
-                {Object.entries(PERMISSIONS).map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-gray-300"
-                      checked={editForm.permissions.includes(key)}
-                      onChange={() => setEditForm({ ...editForm, permissions: togglePermission(editForm.permissions, key) })}
-                    />
-                    {label}
-                  </label>
-                ))}
+                {Object.entries(PERMISSIONS).map(([key, label]) => {
+                  const lockedOn = editRole?.key === "ADMIN" && key === "MANAGE_ROLES";
+                  return (
+                    <label key={key} className={`flex items-center gap-2 text-sm text-gray-700 ${lockedOn ? "opacity-60" : ""}`}>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-300"
+                        checked={editForm.permissions.includes(key)}
+                        disabled={lockedOn}
+                        onChange={() => setEditForm({ ...editForm, permissions: togglePermission(editForm.permissions, key) })}
+                      />
+                      {label}{lockedOn ? " (required)" : ""}
+                    </label>
+                  );
+                })}
               </div>
             </div>
             {editError && <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">{editError}</div>}

@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, CheckCircle, XCircle, Clock, Users, Loader2, Send, RefreshCw, Pencil, FileText } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Clock, Users, Loader2, Send, RefreshCw, Pencil, FileText, SkipForward } from "lucide-react";
 import { formatDate, MRF_STATUSES, CANDIDATE_STAGES } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 import { MRFPdfPreview } from "@/components/mrf-pdf-preview";
@@ -53,7 +53,7 @@ interface MRFDetail {
 }
 
 interface ApprovalRecord {
-  id: string; level: string; approverName: string; approverDesignation: string | null;
+  id: string; level: string; approverName: string; approverRole: string | null; approverDesignation: string | null;
   status: string; notes: string | null; recordedAt: string;
   isAutoApproved: boolean;
   approver: { name: string; signatureUrl: string | null } | null;
@@ -98,8 +98,8 @@ export default function MRFDetailPage() {
 
   const myDesignation = roleLabels[role] || role.replace(/_/g, " ");
 
-  // Approve/reject dialog
-  const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | null>(null);
+  // Approve/reject/skip dialog
+  const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | "skip" | null>(null);
   const [approverName, setApproverName] = useState("");
   const [approverDesignation, setApproverDesignation] = useState("");
   const [notes, setNotes] = useState("");
@@ -136,6 +136,10 @@ export default function MRFDetailPage() {
   const canAct = (isUniversalApprover || isManagerForThisLevel) && mrf?.status?.startsWith("PENDING");
   const isManagerSelfApproval = isManagerForThisLevel && !isUniversalApprover;
   const canSubmitApproval = isManagerSelfApproval ? true : !!approverName;
+  // Skip is purely permission-based — independent of being this stage's
+  // designated approver, e.g. "the Country Supervisor is unavailable, so
+  // someone with this permission pushes it to Functional Head instead".
+  const canSkip = permissions.includes("SKIP_MRF_APPROVAL") && !!mrf?.status?.startsWith("PENDING");
 
   const fetchMRF = () => {
     fetch(`/api/mrfs/${id}`)
@@ -159,7 +163,7 @@ export default function MRFDetailPage() {
       .finally(() => setLoadingApprovers(false));
   }, [sendNextOpen, id]);
 
-  const openApprovalDialog = (action: "approve" | "reject") => {
+  const openApprovalDialog = (action: "approve" | "reject" | "skip") => {
     setApproverName(session?.user?.name || "");
     setApproverDesignation(myDesignation);
     setApprovalDialog(action);
@@ -176,7 +180,7 @@ export default function MRFDetailPage() {
     setApprovalDialog(null);
     setApproverName(""); setApproverDesignation(""); setNotes("");
 
-    if (res.ok && approvalDialog === "approve") {
+    if (res.ok && (approvalDialog === "approve" || approvalDialog === "skip")) {
       // Re-fetch to get new status, then decide whether to show send-next modal
       const updated = await fetch(`/api/mrfs/${id}`).then((r) => r.json());
       setMrf(updated);
@@ -247,32 +251,34 @@ export default function MRFDetailPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-start gap-3 print:hidden">
-        <Link href="/dashboard/mrfs">
-          <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
-        </Link>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-2xl font-bold text-gray-900">{mrf.title}</h2>
-            <span className={`rounded-full px-3 py-1 text-xs font-medium ${statusInfo?.color}`}>
-              {statusInfo?.label || mrf.status}
-            </span>
-            {mrf.isOnHold && (
-              <span className="rounded-full px-3 py-1 text-xs font-medium bg-purple-100 text-purple-700 flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                On hold{mrf.heldBy ? ` by ${mrf.heldBy.name}` : ""}
-                {mrf.holdIndefinite ? " until changed" : mrf.holdUntil ? ` until ${formatDate(mrf.holdUntil)}` : ""}
+      <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:items-start">
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <Link href="/dashboard/mrfs">
+            <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
+          </Link>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h2 className="text-2xl font-bold text-gray-900">{mrf.title}</h2>
+              <span className={`rounded-full px-3 py-1 text-xs font-medium ${statusInfo?.color}`}>
+                {statusInfo?.label || mrf.status}
               </span>
-            )}
+              {mrf.isOnHold && (
+                <span className="rounded-full px-3 py-1 text-xs font-medium bg-purple-100 text-purple-700 flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  On hold{mrf.heldBy ? ` by ${mrf.heldBy.name}` : ""}
+                  {mrf.holdIndefinite ? " until changed" : mrf.holdUntil ? ` until ${formatDate(mrf.holdUntil)}` : ""}
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-gray-500 font-mono mt-1">
+              Ref: {mrf.referenceNumber}
+              {mrf.mrfNumber && <> · MRF No: {mrf.mrfNumber}</>}
+            </p>
           </div>
-          <p className="text-sm text-gray-500 font-mono mt-1">
-            Ref: {mrf.referenceNumber}
-            {mrf.mrfNumber && <> · MRF No: {mrf.mrfNumber}</>}
-          </p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" onClick={() => setPdfPreviewOpen(true)} className="print:hidden">
-            <FileText className="h-4 w-4" /> MRF PDF
+            <FileText className="h-4 w-4" /> Preview MRF
           </Button>
           {mrf.status === "REJECTED" && canManageMrf && (
             <>
@@ -323,6 +329,15 @@ export default function MRFDetailPage() {
                 {isManagerSelfApproval ? "Approve" : "Record Approval"}
               </Button>
             </>
+          )}
+          {canSkip && (
+            <Button
+              variant="outline"
+              onClick={() => openApprovalDialog("skip")}
+              className="text-amber-700 border-amber-300 hover:bg-amber-50"
+            >
+              <SkipForward className="h-4 w-4" /> Skip Level
+            </Button>
           )}
         </div>
       </div>
@@ -390,15 +405,18 @@ export default function MRFDetailPage() {
                 const isCurrentLevel = currentPendingStatus === level.pendingStatus;
                 const isApproved = record?.status === "APPROVED";
                 const isRejected = record?.status === "REJECTED";
+                const isSkipped = record?.status === "SKIPPED";
                 return (
                   <div key={level.key} className="flex items-start gap-3">
                     <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full
                       ${isApproved ? "bg-green-100 text-green-600" :
                         isRejected ? "bg-red-100 text-red-600" :
+                        isSkipped ? "bg-amber-100 text-amber-600" :
                         isCurrentLevel ? "bg-blue-100 text-blue-600" :
                         "bg-gray-100 text-gray-400"}`}>
                       {isApproved ? <CheckCircle className="h-4 w-4" /> :
                        isRejected ? <XCircle className="h-4 w-4" /> :
+                       isSkipped ? <SkipForward className="h-4 w-4" /> :
                        isCurrentLevel ? <Clock className="h-4 w-4" /> :
                        <span className="text-xs">{idx + 1}</span>}
                     </div>
@@ -407,7 +425,7 @@ export default function MRFDetailPage() {
                       {record ? (
                         <>
                           <p className="text-xs text-gray-500">
-                            {record.approverName} · {formatDate(record.recordedAt)}
+                            {isSkipped ? "Skipped by " : ""}{record.approverName} · {formatDate(record.recordedAt)}
                           </p>
                           {record.notes && <p className="text-xs text-gray-600 mt-0.5 italic">"{record.notes}"</p>}
                         </>
@@ -417,9 +435,9 @@ export default function MRFDetailPage() {
                         <p className="text-xs text-gray-400">Pending</p>
                       )}
                     </div>
-                    {(isApproved || isRejected) && (
-                      <Badge variant={isApproved ? "success" : "destructive"} className="shrink-0 mt-0.5">
-                        {isApproved ? "Approved" : "Rejected"}
+                    {(isApproved || isRejected || isSkipped) && (
+                      <Badge variant={isApproved ? "success" : isSkipped ? "warning" : "destructive"} className="shrink-0 mt-0.5">
+                        {isApproved ? "Approved" : isSkipped ? "Skipped" : "Rejected"}
                       </Badge>
                     )}
                   </div>
@@ -501,22 +519,27 @@ export default function MRFDetailPage() {
         </Card>
       )}
 
-      {/* Approve/Reject Dialog */}
+      {/* Approve/Reject/Skip Dialog */}
       <Dialog open={approvalDialog !== null} onOpenChange={() => setApprovalDialog(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {approvalDialog === "approve" ? "Approve MRF" : "Reject MRF"}
+              {approvalDialog === "approve" ? "Approve MRF" : approvalDialog === "skip" ? "Skip Approval Level" : "Reject MRF"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {approvalDialog === "skip" && (
+              <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+                This bypasses the current approval level entirely and moves the MRF straight to the next stage, without recording an actual approval at this level.
+              </div>
+            )}
             <div className="space-y-2">
-              <Label>Approver Name</Label>
+              <Label>{approvalDialog === "skip" ? "Skipped By" : "Approver Name"}</Label>
               <Input value={approverName} disabled />
-              <p className="text-xs text-gray-400">Taken from your account — this is who the system records as the approver.</p>
+              <p className="text-xs text-gray-400">Taken from your account — this is who the system records.</p>
             </div>
             <div className="space-y-2">
-              <Label>Approver Designation</Label>
+              <Label>{approvalDialog === "skip" ? "Designation" : "Approver Designation"}</Label>
               <Input
                 placeholder="Job title / designation"
                 value={approverDesignation}
@@ -524,9 +547,15 @@ export default function MRFDetailPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>{approvalDialog === "reject" ? "Reason for Rejection *" : "Notes / Reference"}</Label>
+              <Label>
+                {approvalDialog === "reject" ? "Reason for Rejection *" : approvalDialog === "skip" ? "Reason for Skipping *" : "Notes / Reference"}
+              </Label>
               <Textarea
-                placeholder={approvalDialog === "approve" ? "Email ref / document number..." : "Reason for rejection..."}
+                placeholder={
+                  approvalDialog === "approve" ? "Email ref / document number..." :
+                  approvalDialog === "skip" ? "Why this level is being skipped..." :
+                  "Reason for rejection..."
+                }
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={3}
@@ -537,11 +566,12 @@ export default function MRFDetailPage() {
             <Button variant="outline" onClick={() => setApprovalDialog(null)}>Cancel</Button>
             <Button
               onClick={handleApproval}
-              disabled={!canSubmitApproval || (approvalDialog === "reject" && !notes) || submitting}
-              variant={approvalDialog === "reject" ? "destructive" : "default"}
+              disabled={!canSubmitApproval || ((approvalDialog === "reject" || approvalDialog === "skip") && !notes.trim()) || submitting}
+              variant={approvalDialog === "reject" ? "destructive" : approvalDialog === "skip" ? "outline" : "default"}
+              className={approvalDialog === "skip" ? "text-amber-700 border-amber-300 hover:bg-amber-50" : ""}
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              {approvalDialog === "approve" ? "Approve" : "Reject"}
+              {approvalDialog === "approve" ? "Approve" : approvalDialog === "skip" ? "Skip Level" : "Reject"}
             </Button>
           </DialogFooter>
         </DialogContent>

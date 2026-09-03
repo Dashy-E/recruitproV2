@@ -18,11 +18,26 @@ export default function StagesSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   const fetchStages = () => {
+    setError("");
     fetch("/api/workflow-stages")
       .then((r) => r.json())
-      .then((d) => { setStages(Array.isArray(d) ? d : []); setLoading(false); });
+      .then((d) => {
+        // The API catches its own DB errors and returns { error } rather
+        // than crashing — without this check that was silently rendering
+        // as "zero stages" instead of a visible failure (indistinguishable
+        // from there genuinely being none configured).
+        if (Array.isArray(d)) {
+          setStages(d);
+        } else {
+          setStages([]);
+          setError(d?.error || "Failed to load workflow stages.");
+        }
+        setLoading(false);
+      })
+      .catch(() => { setStages([]); setError("Failed to load workflow stages."); setLoading(false); });
   };
 
   useEffect(() => { fetchStages(); }, []);
@@ -78,6 +93,13 @@ export default function StagesSettingsPage() {
           <p className="text-sm text-gray-500">Enable/disable and reorder candidate pipeline stages</p>
         </div>
       </div>
+
+      {error && (
+        <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700 flex items-center justify-between gap-3">
+          <span>{error} — this is usually a transient database hiccup.</span>
+          <Button size="sm" variant="outline" onClick={fetchStages}>Retry</Button>
+        </div>
+      )}
 
       <Card>
         <CardHeader>

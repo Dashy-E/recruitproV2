@@ -13,6 +13,7 @@ import { ArrowLeft, Loader2, Send, Pencil } from "lucide-react";
 import Link from "next/link";
 import { OrgUnitPicker, OrgTreeNode } from "@/components/org-unit-picker";
 import { toast } from "@/hooks/use-toast";
+import { USER_ROLES } from "@/lib/utils";
 
 interface Department { id: string; name: string; designations: Designation[] }
 interface Designation { id: string; title: string; requiresPsychometric: boolean }
@@ -71,8 +72,6 @@ export default function NewMRFPage() {
 
   // Optional — prints on the PDF's "Divisional Head" signature block in
   // place of that static label, instead of pulling from an actual approval.
-  const [approvalSignatureName, setApprovalSignatureName] = useState("");
-  const [approvalSignatureDesignation, setApprovalSignatureDesignation] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -96,10 +95,14 @@ export default function NewMRFPage() {
     fetch("/api/org/departments").then((r) => r.json()).then((d) => setDepartments(Array.isArray(d) ? d : []));
   }, []);
 
-  // "Raised By" defaults to whoever's actually submitting the form.
+  // "Raised By" defaults to whoever's actually submitting the form — name
+  // and designation both come from their session, not free text, so the
+  // printed form always reflects who's actually raising it.
   useEffect(() => {
     if (session?.user?.name) setFillerName(session.user.name);
-  }, [session?.user?.name]);
+    const role = (session?.user as { role?: string })?.role;
+    if (role) setFillerDesignation(USER_ROLES[role as keyof typeof USER_ROLES] || role);
+  }, [session?.user?.name, (session?.user as { role?: string })?.role]);
 
   const isValid = () => {
     if (!title || !selectedOrgUnit || !selectedDepartment) return false;
@@ -154,8 +157,6 @@ export default function NewMRFPage() {
       // Filler details
       fillerName,
       fillerDesignation,
-      approvalSignatureName: approvalSignatureName || null,
-      approvalSignatureDesignation: approvalSignatureDesignation || null,
     };
 
     const res = await fetch("/api/mrfs", {
@@ -357,7 +358,7 @@ export default function NewMRFPage() {
               </label>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Department *</Label>
                 <Select onValueChange={(v) => { setSelectedDepartment(v); setSelectedDesignation(""); }}>
@@ -382,7 +383,7 @@ export default function NewMRFPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Grade</Label>
                 <Input value={proposedGrade} onChange={(e) => setProposedGrade(e.target.value)} placeholder="e.g. M3" />
@@ -393,7 +394,7 @@ export default function NewMRFPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Location</Label>
                 <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Branch or specific location" />
@@ -428,7 +429,7 @@ export default function NewMRFPage() {
         <Card>
           <CardHeader><CardTitle>Section 4 – Candidate Specifications</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Min Age</Label>
                 <Input type="number" value={minAge} onChange={(e) => setMinAge(e.target.value)} placeholder="e.g. 22" />
@@ -438,7 +439,7 @@ export default function NewMRFPage() {
                 <Input type="number" value={maxAge} onChange={(e) => setMaxAge(e.target.value)} placeholder="e.g. 35" />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Min Qualification</Label>
                 <Input value={minQualification} onChange={(e) => setMinQualification(e.target.value)} placeholder="e.g. B.Sc. / Diploma" />
@@ -448,7 +449,7 @@ export default function NewMRFPage() {
                 <Input value={preferredQualification} onChange={(e) => setPreferredQualification(e.target.value)} placeholder="e.g. M.Sc. / B.Tech" />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Work Experience</Label>
                 <Input value={workExperience} onChange={(e) => setWorkExperience(e.target.value)} placeholder="e.g. 3–5 years" />
@@ -491,7 +492,7 @@ export default function NewMRFPage() {
             <CardTitle>Raised By</CardTitle>
             <p className="text-sm text-gray-500">Details of the person raising this MRF</p>
           </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-4">
+          <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Full Name *</Label>
               <Input
@@ -505,37 +506,10 @@ export default function NewMRFPage() {
             <div className="space-y-2">
               <Label>Designation *</Label>
               <Input
-                placeholder="Your designation / job title"
                 value={fillerDesignation}
                 onChange={(e) => setFillerDesignation(e.target.value)}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Approval Signature (optional — for the printed PDF only) */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Approval Signature (optional)</CardTitle>
-            <p className="text-sm text-gray-500">
-              Prints on the requisition PDF's "Divisional Head" signature block, in place of that label. Leave blank to keep the default "Divisional Head" label.
-            </p>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Name</Label>
-              <Input
-                placeholder="Name to print on the signature line"
-                value={approvalSignatureName}
-                onChange={(e) => setApprovalSignatureName(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Designation</Label>
-              <Input
-                placeholder="e.g. Regional Manager"
-                value={approvalSignatureDesignation}
-                onChange={(e) => setApprovalSignatureDesignation(e.target.value)}
+                readOnly
+                className="bg-gray-50 cursor-not-allowed"
               />
             </div>
           </CardContent>

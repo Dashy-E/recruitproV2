@@ -12,11 +12,15 @@ const ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg"];
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermission(session, "MANAGE_USERS")) {
+
+  const { id } = await params;
+  const isSelf = id === (session.user as { id?: string })?.id;
+  // Anyone can upload their own signature (self-service profile); MANAGE_USERS
+  // is required to upload on behalf of someone else (Users -> Edit).
+  if (!isSelf && !hasPermission(session, "MANAGE_USERS")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { id } = await params;
   const target = await db("RECRUIT_T_User").where({ id }).first();
   if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
 

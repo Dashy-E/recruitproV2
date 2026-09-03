@@ -78,7 +78,7 @@ export default function ApprovalsPage() {
   const canActOnMrf = (m: MRF) => isUniversalApprover || m.canApprove;
 
   const fetchMRFs = () => {
-    fetch("/api/mrfs")
+    fetch("/api/mrfs?includeApprovalRecords=1")
       .then((r) => r.json())
       .then((d) => { setMrfs(Array.isArray(d) ? d : []); setLoading(false); });
   };
@@ -126,7 +126,7 @@ export default function ApprovalsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Approval Portal</h2>
           <p className="text-sm text-gray-500 mt-1">
@@ -161,7 +161,7 @@ export default function ApprovalsPage() {
             return (
               <Card key={mrf.id} className={`border-l-4 ${canAct ? "border-l-blue-500" : "border-l-gray-200"}`}>
                 <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-sm text-gray-500">{mrf.mrfNumber || mrf.referenceNumber}</span>
@@ -189,7 +189,7 @@ export default function ApprovalsPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
                       <Link href={`/dashboard/mrfs/${mrf.id}`} target="_blank">
                         <Button variant="ghost" size="sm" className="text-xs">
                           <ExternalLink className="h-3 w-3 mr-1" /> View MRF

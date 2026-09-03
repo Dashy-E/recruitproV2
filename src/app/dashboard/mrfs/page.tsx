@@ -45,19 +45,32 @@ function MRFsContent() {
   const [mrfs, setMrfs] = useState<MRF[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const canCreate = permissions.includes("CREATE_MRF");
   // Server-computed (org/department-scoped) — not universal "ANY" approvers,
   // who see everything and don't need a "pending for me" banner.
   const pendingForMe = approvalLevel && approvalLevel !== "ANY" ? mrfs.filter((m) => m.canApprove) : [];
 
-  useEffect(() => {
+  const fetchMRFs = () => {
     setLoading(true);
+    setError("");
     const url = orgUnitFilter ? `/api/mrfs?orgUnit=${orgUnitFilter}` : "/api/mrfs";
     fetch(url)
       .then((r) => r.json())
-      .then((data) => { setMrfs(Array.isArray(data) ? data : []); setLoading(false); });
-  }, [orgUnitFilter]);
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setMrfs(data);
+        } else {
+          setMrfs([]);
+          setError(data?.error || "Failed to load MRFs.");
+        }
+        setLoading(false);
+      })
+      .catch(() => { setMrfs([]); setError("Failed to load MRFs — this is usually a transient database hiccup."); setLoading(false); });
+  };
+
+  useEffect(fetchMRFs, [orgUnitFilter]);
 
   const filtered = mrfs.filter(
     (m) =>
@@ -99,7 +112,7 @@ function MRFsContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Manpower Requisition Forms</h2>
           <p className="text-sm text-gray-500 mt-1">{mrfs.length} total MRFs</p>
@@ -113,6 +126,13 @@ function MRFsContent() {
           </Link>
         )}
       </div>
+
+      {error && (
+        <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700 flex items-center justify-between gap-3">
+          <span>{error}</span>
+          <Button size="sm" variant="outline" onClick={fetchMRFs}>Retry</Button>
+        </div>
+      )}
 
       {/* Pending approval banner for managers */}
       {pendingForMe.length > 0 && (

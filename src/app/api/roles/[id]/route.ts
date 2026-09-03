@@ -17,13 +17,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const role = await db("RECRUIT_T_Role").where({ id }).first();
   if (!role) return NextResponse.json({ error: "Role not found" }, { status: 404 });
 
-  // The ADMIN role is always full-access — editing it risks locking every
-  // admin out of the system, so it's read-only via this API.
-  if (role.key === "ADMIN") {
-    return NextResponse.json({ error: "The Admin role cannot be modified" }, { status: 403 });
-  }
-
+  const isAdminRole = role.key === "ADMIN";
   const { label, approvalLevel, isActive, permissions } = await req.json();
+
+  // The ADMIN role's name, approval level, and active status stay locked —
+  // changing those risks locking every admin out with no way back in
+  // through the UI. Permissions ARE editable now, but MANAGE_ROLES
+  // specifically can't be removed from ADMIN below: without it, nobody
+  // could ever return to this page to undo a mistake.
+  if (isAdminRole && (label !== undefined || approvalLevel !== undefined || isActive !== undefined)) {
+    return NextResponse.json({ error: "The Admin role's name, approval level, and active status cannot be changed" }, { status: 403 });
+  }
 
   if (approvalLevel !== undefined && approvalLevel !== null && !["DIVISIONAL", "FUNCTIONAL", "COUNTRY", "COUNTRY_SUPERVISOR", "ANY"].includes(approvalLevel)) {
     return NextResponse.json({ error: "Invalid approval level" }, { status: 400 });
@@ -34,6 +38,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const invalid = permissionKeys.filter((p) => !(p in PERMISSIONS));
     if (invalid.length) {
       return NextResponse.json({ error: `Unknown permission(s): ${invalid.join(", ")}` }, { status: 400 });
+    }
+    if (isAdminRole && !permissionKeys.includes("MANAGE_ROLES")) {
+      return NextResponse.json({ error: "MANAGE_ROLES cannot be removed from the Admin role" }, { status: 403 });
     }
   }
 
