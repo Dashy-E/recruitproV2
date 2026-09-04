@@ -73,6 +73,7 @@ export default function UsersPage() {
   const [signatureFile, setSignatureFile] = useState<File | null>(null);
   const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState("");
+  const [deletingSignature, setDeletingSignature] = useState(false);
 
   const fetchUsers = () => {
     fetch("/api/users").then((r) => r.json()).then((d) => { setUsers(Array.isArray(d) ? d : []); setLoading(false); });
@@ -157,6 +158,21 @@ export default function UsersPage() {
     }
     setSignatureFile(file);
     setSignaturePreview(URL.createObjectURL(file));
+  };
+
+  const handleDeleteSignature = async () => {
+    if (!editUser) return;
+    setDeletingSignature(true);
+    setSignatureError("");
+    const res = await fetch(`/api/users/${editUser.id}/signature`, { method: "DELETE" });
+    setDeletingSignature(false);
+    if (res.ok) {
+      setSignatureFile(null);
+      setSignaturePreview(null);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setSignatureError(data.error || "Failed to delete signature.");
+    }
   };
 
   const handleEdit = async () => {
@@ -397,6 +413,19 @@ export default function UsersPage() {
                   </div>
                 )}
                 <Input type="file" accept="image/png,image/jpeg" onChange={handleSignatureFileChange} className="max-w-xs" />
+                {editUser?.signatureUrl && signaturePreview && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDeleteSignature}
+                    disabled={deletingSignature}
+                    className="text-red-600 border-red-200 hover:bg-red-50"
+                  >
+                    {deletingSignature ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    Delete
+                  </Button>
+                )}
               </div>
               {signatureError && <p className="text-xs text-red-500">{signatureError}</p>}
             </div>

@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, CheckCircle, XCircle, Clock, Users, Loader2, Send, RefreshCw, Pencil, FileText, SkipForward } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Clock, Users, Loader2, Send, RefreshCw, Pencil, FileText, SkipForward, Upload, Paperclip } from "lucide-react";
 import { formatDate, MRF_STATUSES, CANDIDATE_STAGES } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 import { MRFPdfPreview } from "@/components/mrf-pdf-preview";
@@ -38,6 +38,7 @@ interface MRFDetail {
   createdBy: { name: string; email: string; signatureUrl: string | null };
   approvalRecords: ApprovalRecord[];
   candidates: CandidateSummary[];
+  documents: MRFDocument[];
   // Server-computed: is the requesting user genuinely the designated
   // approver for this MRF's current stage (org/department-scoped)? See
   // src/lib/mrf-approval.ts — kept server-side so the Approve button can't
@@ -64,6 +65,11 @@ interface CandidateSummary {
   currentStage: string; aiScore: number | null;
 }
 
+interface MRFDocument {
+  id: string; name: string; fileUrl: string | null; fileSize: number;
+  createdAt: string; uploadedBy: { name: string } | null;
+}
+
 // level here is the stage-grouping key stored on RECRUIT_T_MRFApprovalRecord
 // (see LEVEL_LABEL in approve/route.ts) — stage 1's label is generic since
 // either a Divisional or a Country Manager may have actually approved it
@@ -72,11 +78,13 @@ const APPROVAL_LEVELS = [
   { key: "DIVISIONAL_MANAGER", label: "Divisional / Country Manager", pendingStatus: "PENDING_DIVISIONAL" },
   { key: "COUNTRY_SUPERVISOR", label: "Country Supervisor", pendingStatus: "PENDING_COUNTRY_SUPERVISOR" },
   { key: "FUNCTIONAL_HEAD", label: "Functional Head", pendingStatus: "PENDING_FUNCTIONAL" },
+  { key: "FINAL_APPROVAL", label: "Final Approval", pendingStatus: "PENDING_FINAL_APPROVAL" },
 ];
 
 const NEXT_LEVEL_LABEL: Record<string, string> = {
   PENDING_COUNTRY_SUPERVISOR: "Country Supervisor",
   PENDING_FUNCTIONAL: "Functional Head",
+  PENDING_FINAL_APPROVAL: "Document Upload Team",
 };
 
 export default function MRFDetailPage() {
@@ -98,8 +106,8 @@ export default function MRFDetailPage() {
 
   const myDesignation = roleLabels[role] || role.replace(/_/g, " ");
 
-  // Approve/reject/skip dialog
-  const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | "skip" | null>(null);
+  // Approve/reject/skip/finalApprove/hold dialog
+  const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | "skip" | "finalApprove" | "hold" | null>(null);
   const [approverName, setApproverName] = useState("");
   const [approverDesignation, setApproverDesignation] = useState("");
   const [notes, setNotes] = useState("");
@@ -128,18 +136,33 @@ export default function MRFDetailPage() {
   // Requisition form PDF preview
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
 
+  // Supporting document upload (Final Approval gate)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadingDocs, setUploadingDocs] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+
   const permissions = (session?.user as { permissions?: string[] })?.permissions || [];
   const canManageMrf = permissions.includes("MANAGE_MRF");
   const canSendApprovalEmail = permissions.includes("SEND_MRF_APPROVAL_EMAIL");
   const isUniversalApprover = approvalLevel === "ANY";
   const isManagerForThisLevel = !!mrf?.canApprove;
-  const canAct = (isUniversalApprover || isManagerForThisLevel) && mrf?.status?.startsWith("PENDING");
+  // PENDING_FINAL_APPROVAL isn't part of the DIVISIONAL/SUPERVISOR/FUNCTIONAL
+  // role ladder at all (it's permission-based, see canUploadDocuments/
+  // canFinalDecide below) — excluded here even though its name also starts
+  // with "PENDING", so the old Approve/Reject/Skip buttons don't show for it.
+  const isFinalApprovalStage = mrf?.status === "PENDING_FINAL_APPROVAL";
+  const canAct = (isUniversalApprover || isManagerForThisLevel) && mrf?.status?.startsWith("PENDING") && !isFinalApprovalStage;
   const isManagerSelfApproval = isManagerForThisLevel && !isUniversalApprover;
   const canSubmitApproval = isManagerSelfApproval ? true : !!approverName;
   // Skip is purely permission-based — independent of being this stage's
   // designated approver, e.g. "the Country Supervisor is unavailable, so
   // someone with this permission pushes it to Functional Head instead".
-  const canSkip = permissions.includes("SKIP_MRF_APPROVAL") && !!mrf?.status?.startsWith("PENDING");
+  const canSkip = permissions.includes("SKIP_MRF_APPROVAL") && !!mrf?.status?.startsWith("PENDING") && !isFinalApprovalStage;
+  // Document upload and the Final Approve/Reject/Hold decision are both
+  // gated purely on their own permissions, independent of the approval
+  // hierarchy above — see UPLOAD_MRF_DOCUMENTS/FINAL_APPROVE_MRF.
+  const canUploadDocuments = permissions.includes("UPLOAD_MRF_DOCUMENTS") && isFinalApprovalStage;
+  const canFinalDecide = permissions.includes("FINAL_APPROVE_MRF") && isFinalApprovalStage && (mrf?.documents?.length ?? 0) > 0;
 
   const fetchMRF = () => {
     fetch(`/api/mrfs/${id}`)
@@ -163,7 +186,7 @@ export default function MRFDetailPage() {
       .finally(() => setLoadingApprovers(false));
   }, [sendNextOpen, id]);
 
-  const openApprovalDialog = (action: "approve" | "reject" | "skip") => {
+  const openApprovalDialog = (action: "approve" | "reject" | "skip" | "finalApprove" | "hold") => {
     setApproverName(session?.user?.name || "");
     setApproverDesignation(myDesignation);
     setApprovalDialog(action);
@@ -240,6 +263,39 @@ export default function MRFDetailPage() {
     await fetch(`/api/mrfs/${id}/hold`, { method: "DELETE" });
     setHolding(false);
     fetchMRF();
+  };
+
+  const ALLOWED_DOC_EXTENSIONS = [".pdf", ".png", ".jpg", ".jpeg"];
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const invalid = files.find((f) => !ALLOWED_DOC_EXTENSIONS.includes(f.name.slice(f.name.lastIndexOf(".")).toLowerCase()));
+    if (invalid) {
+      setUploadError(`"${invalid.name}": only PDF, PNG, JPG, or JPEG files are accepted`);
+      setSelectedFiles([]);
+      e.target.value = "";
+      return;
+    }
+    setUploadError("");
+    setSelectedFiles(files);
+  };
+
+  const handleUploadDocuments = async () => {
+    if (!selectedFiles.length) return;
+    setUploadingDocs(true);
+    setUploadError("");
+    const formData = new FormData();
+    selectedFiles.forEach((f) => formData.append("file", f));
+    const res = await fetch(`/api/mrfs/${id}/documents`, { method: "POST", body: formData });
+    setUploadingDocs(false);
+    if (res.ok) {
+      setSelectedFiles([]);
+      fetchMRF();
+      toast({ variant: "success", title: "Documents uploaded" });
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setUploadError(data.error || "Failed to upload documents.");
+    }
   };
 
   if (loading) return <div className="py-20 text-center text-gray-500"><Loader2 className="mx-auto h-8 w-8 animate-spin" /></div>;
@@ -339,6 +395,23 @@ export default function MRFDetailPage() {
               <SkipForward className="h-4 w-4" /> Skip Level
             </Button>
           )}
+          {canFinalDecide && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => openApprovalDialog("hold")}
+                className="text-purple-600 border-purple-200 hover:bg-purple-50"
+              >
+                <Clock className="h-4 w-4" /> Hold
+              </Button>
+              <Button variant="outline" onClick={() => openApprovalDialog("reject")} className="text-red-600 border-red-200 hover:bg-red-50">
+                <XCircle className="h-4 w-4" /> Reject
+              </Button>
+              <Button onClick={() => openApprovalDialog("finalApprove")} className="bg-green-600 hover:bg-green-700">
+                <CheckCircle className="h-4 w-4" /> Final Approve
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -355,6 +428,59 @@ export default function MRFDetailPage() {
             <p className="text-xs text-red-600 mt-1">You can edit this MRF and restart the approval process.</p>
           )}
         </div>
+      )}
+
+      {isFinalApprovalStage && (
+        <Card className="print:hidden">
+          <CardHeader>
+            <CardTitle>Supporting Documents</CardTitle>
+            <p className="text-sm text-gray-500">
+              Upload supporting files before a final decision can be made. Accepted formats: PDF, PNG, JPG, JPEG.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {mrf.documents.length > 0 ? (
+              <div className="space-y-2">
+                {mrf.documents.map((doc) => (
+                  <div key={doc.id} className="flex items-center gap-3 rounded-md border border-gray-100 px-3 py-2 text-sm">
+                    <Paperclip className="h-4 w-4 text-gray-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      {doc.fileUrl ? (
+                        <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-blue-600 hover:underline truncate block">
+                          {doc.name}
+                        </a>
+                      ) : (
+                        <span className="font-medium text-gray-700 truncate block">{doc.name}</span>
+                      )}
+                      <p className="text-xs text-gray-400">
+                        {(doc.fileSize / 1024).toFixed(0)} KB · {doc.uploadedBy?.name || "Unknown"} · {formatDate(doc.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400">No documents uploaded yet.</p>
+            )}
+
+            {canUploadDocuments && (
+              <div className="pt-2 border-t space-y-2">
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  onChange={handleFileSelect}
+                  className="text-sm text-gray-600 file:mr-3 file:rounded-md file:border file:border-gray-200 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-gray-50"
+                />
+                {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
+                <Button size="sm" onClick={handleUploadDocuments} disabled={!selectedFiles.length || uploadingDocs}>
+                  {uploadingDocs ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  Upload {selectedFiles.length > 0 ? `(${selectedFiles.length})` : ""}
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
@@ -406,17 +532,20 @@ export default function MRFDetailPage() {
                 const isApproved = record?.status === "APPROVED";
                 const isRejected = record?.status === "REJECTED";
                 const isSkipped = record?.status === "SKIPPED";
+                const isHeld = record?.status === "HELD";
                 return (
                   <div key={level.key} className="flex items-start gap-3">
                     <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full
                       ${isApproved ? "bg-green-100 text-green-600" :
                         isRejected ? "bg-red-100 text-red-600" :
                         isSkipped ? "bg-amber-100 text-amber-600" :
+                        isHeld ? "bg-purple-100 text-purple-600" :
                         isCurrentLevel ? "bg-blue-100 text-blue-600" :
                         "bg-gray-100 text-gray-400"}`}>
                       {isApproved ? <CheckCircle className="h-4 w-4" /> :
                        isRejected ? <XCircle className="h-4 w-4" /> :
                        isSkipped ? <SkipForward className="h-4 w-4" /> :
+                       isHeld ? <Clock className="h-4 w-4" /> :
                        isCurrentLevel ? <Clock className="h-4 w-4" /> :
                        <span className="text-xs">{idx + 1}</span>}
                     </div>
@@ -425,7 +554,7 @@ export default function MRFDetailPage() {
                       {record ? (
                         <>
                           <p className="text-xs text-gray-500">
-                            {isSkipped ? "Skipped by " : ""}{record.approverName} · {formatDate(record.recordedAt)}
+                            {isSkipped ? "Skipped by " : isHeld ? "Held by " : ""}{record.approverName} · {formatDate(record.recordedAt)}
                           </p>
                           {record.notes && <p className="text-xs text-gray-600 mt-0.5 italic">"{record.notes}"</p>}
                         </>
@@ -435,9 +564,9 @@ export default function MRFDetailPage() {
                         <p className="text-xs text-gray-400">Pending</p>
                       )}
                     </div>
-                    {(isApproved || isRejected || isSkipped) && (
-                      <Badge variant={isApproved ? "success" : isSkipped ? "warning" : "destructive"} className="shrink-0 mt-0.5">
-                        {isApproved ? "Approved" : isSkipped ? "Skipped" : "Rejected"}
+                    {(isApproved || isRejected || isSkipped || isHeld) && (
+                      <Badge variant={isApproved ? "success" : isSkipped || isHeld ? "warning" : "destructive"} className="shrink-0 mt-0.5">
+                        {isApproved ? "Approved" : isSkipped ? "Skipped" : isHeld ? "On Hold" : "Rejected"}
                       </Badge>
                     )}
                   </div>
@@ -519,18 +648,32 @@ export default function MRFDetailPage() {
         </Card>
       )}
 
-      {/* Approve/Reject/Skip Dialog */}
+      {/* Approve/Reject/Skip/Final Approve/Hold Dialog */}
       <Dialog open={approvalDialog !== null} onOpenChange={() => setApprovalDialog(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {approvalDialog === "approve" ? "Approve MRF" : approvalDialog === "skip" ? "Skip Approval Level" : "Reject MRF"}
+              {approvalDialog === "approve" ? "Approve MRF" :
+               approvalDialog === "skip" ? "Skip Approval Level" :
+               approvalDialog === "finalApprove" ? "Final Approve MRF" :
+               approvalDialog === "hold" ? "Hold Final Decision" :
+               "Reject MRF"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {approvalDialog === "skip" && (
               <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
                 This bypasses the current approval level entirely and moves the MRF straight to the next stage, without recording an actual approval at this level.
+              </div>
+            )}
+            {approvalDialog === "hold" && (
+              <div className="rounded-md bg-purple-50 border border-purple-200 p-3 text-sm text-purple-800">
+                Defers the final decision — Final Approve and Reject stay available afterward, nothing is locked in yet.
+              </div>
+            )}
+            {approvalDialog === "finalApprove" && (
+              <div className="rounded-md bg-green-50 border border-green-200 p-3 text-sm text-green-800">
+                This assigns the MRF Number and completes the approval process. This cannot be undone.
               </div>
             )}
             <div className="space-y-2">
@@ -548,12 +691,16 @@ export default function MRFDetailPage() {
             </div>
             <div className="space-y-2">
               <Label>
-                {approvalDialog === "reject" ? "Reason for Rejection *" : approvalDialog === "skip" ? "Reason for Skipping *" : "Notes / Reference"}
+                {approvalDialog === "reject" ? "Reason for Rejection *" :
+                 approvalDialog === "skip" ? "Reason for Skipping *" :
+                 approvalDialog === "hold" ? "Reason for Hold *" :
+                 "Notes / Reference"}
               </Label>
               <Textarea
                 placeholder={
-                  approvalDialog === "approve" ? "Email ref / document number..." :
+                  approvalDialog === "approve" || approvalDialog === "finalApprove" ? "Email ref / document number..." :
                   approvalDialog === "skip" ? "Why this level is being skipped..." :
+                  approvalDialog === "hold" ? "Why this decision is being held..." :
                   "Reason for rejection..."
                 }
                 value={notes}
@@ -566,12 +713,16 @@ export default function MRFDetailPage() {
             <Button variant="outline" onClick={() => setApprovalDialog(null)}>Cancel</Button>
             <Button
               onClick={handleApproval}
-              disabled={!canSubmitApproval || ((approvalDialog === "reject" || approvalDialog === "skip") && !notes.trim()) || submitting}
-              variant={approvalDialog === "reject" ? "destructive" : approvalDialog === "skip" ? "outline" : "default"}
-              className={approvalDialog === "skip" ? "text-amber-700 border-amber-300 hover:bg-amber-50" : ""}
+              disabled={!canSubmitApproval || ((approvalDialog === "reject" || approvalDialog === "skip" || approvalDialog === "hold") && !notes.trim()) || submitting}
+              variant={approvalDialog === "reject" ? "destructive" : approvalDialog === "skip" || approvalDialog === "hold" ? "outline" : "default"}
+              className={approvalDialog === "skip" ? "text-amber-700 border-amber-300 hover:bg-amber-50" : approvalDialog === "hold" ? "text-purple-700 border-purple-300 hover:bg-purple-50" : ""}
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              {approvalDialog === "approve" ? "Approve" : approvalDialog === "skip" ? "Skip Level" : "Reject"}
+              {approvalDialog === "approve" ? "Approve" :
+               approvalDialog === "skip" ? "Skip Level" :
+               approvalDialog === "finalApprove" ? "Final Approve" :
+               approvalDialog === "hold" ? "Hold" :
+               "Reject"}
             </Button>
           </DialogFooter>
         </DialogContent>

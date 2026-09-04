@@ -6,6 +6,7 @@ import { toBool, fromBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath, getAccessibleOrgUnitIds } from "@/lib/org-access";
 import { isDesignatedApproverForStage } from "@/lib/mrf-approval";
+import { getSignedFileUrl } from "@/lib/s3";
 
 const MRF_BOOLEAN_FIELDS = ["isNewRole", "isBusinessExpansion", "isBudgeted", "contributionJustified"];
 
@@ -35,12 +36,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const requestingUserId = (session.user as { id?: string })?.id!;
   const canApprove = await isDesignatedApproverForStage(requestingUserId, approvalLevel as any, mrf);
 
-  const [department, designation, createdBy, heldBy] = await Promise.all([
+  const [department, designation, createdByRow, heldBy] = await Promise.all([
     db("RECRUIT_T_Department").where({ id: mrf.departmentId }).first(),
     mrf.designationId ? db("RECRUIT_T_Designation").where({ id: mrf.designationId }).first() : null,
     db("RECRUIT_T_User").where({ id: mrf.createdById }).select("name", "email", "signatureUrl").first(),
     mrf.heldById ? db("RECRUIT_T_User").where({ id: mrf.heldById }).select("name").first() : null,
   ]);
+  const createdBy = createdByRow
+    ? { ...createdByRow, signatureUrl: await getSignedFileUrl(createdByRow.signatureUrl) }
+    : null;
 
   // Computed here (not left to the client) so "is this actually on hold
   // right now" can't drift from what src/lib/mrf-reminders.ts uses to decide
@@ -57,15 +61,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     db("RECRUIT_T_User").whereIn("id", approverIds).select("id", "name", "signatureUrl"),
     db("RECRUIT_T_Document").whereIn("id", documentIds),
   ]);
-  const approvalRecords = approvalRecordsRaw.map((r: any) => ({
+  const approvalRecords = await Promise.all(approvalRecordsRaw.map(async (r: any) => ({
     ...r,
     isAutoApproved: fromBool(r.isAutoApproved),
-    approver: r.approverId ? (() => {
+    approver: r.approverId ? await (async () => {
       const a = approvers.find((x: any) => x.id === r.approverId);
-      return a ? { name: a.name, signatureUrl: a.signatureUrl || null } : null;
+      return a ? { name: a.name, signatureUrl: await getSignedFileUrl(a.signatureUrl) } : null;
     })() : null,
     document: r.documentId ? approvalDocs.find((d: any) => d.id === r.documentId) || null : null,
-  }));
+  })));
 
   const candidatesRaw = await db("RECRUIT_T_Candidate").where({ mrfId: id });
   const candidateUserIds = candidatesRaw.map((c: any) => c.userId);
@@ -85,13 +89,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const uploaders = uploaderIds.length
     ? await db("RECRUIT_T_User").whereIn("id", uploaderIds).select("id", "name")
     : [];
-  const documents = documentsRaw.map((d: any) => ({
+  const documents = await Promise.all(documentsRaw.map(async (d: any) => ({
     ...d,
+    fileUrl: await getSignedFileUrl(d.fileUrl),
     uploadedBy: (() => {
       const u = uploaders.find((x: any) => x.id === d.uploadedById);
       return u ? { name: u.name } : null;
     })(),
-  }));
+  })));
 
   // Oracle has no native boolean type — these columns come back as raw
   // NUMBER(1) (0/1), not real booleans, so anything doing a strict ===

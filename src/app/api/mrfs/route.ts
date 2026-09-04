@@ -7,7 +7,7 @@ import { toBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath, getAccessibleOrgUnitIds, expandDescendantsSync } from "@/lib/org-access";
 import { generateReferenceNumber, generateMRFNumber } from "@/lib/mrf-number";
-import { getEligibleApprovers, isDesignatedApproverForStage, computeInitialMrfState, insertAutoApprovalRecords, STAGE_LEVEL_LABEL } from "@/lib/mrf-approval";
+import { getEligibleApprovers, getUsersWithPermission, isDesignatedApproverForStage, computeInitialMrfState, insertAutoApprovalRecords, STAGE_LEVEL_LABEL } from "@/lib/mrf-approval";
 import { ApprovalLevel, STATUS_TO_APPROVAL_LEVELS } from "@/lib/permissions";
 
 async function attachRelations(mrfs: any[], requestingUserId: string, requestingApprovalLevel: ApprovalLevel | null, includeApprovalRecords: boolean) {
@@ -242,7 +242,16 @@ export async function POST(req: NextRequest) {
   // authorize the approval itself (see src/lib/mrf-approval.ts). Nothing to
   // notify if the creator's seniority skipped every stage.
   if (!isImmediatelyApproved) {
-    const scopedManagers = await getEligibleApprovers({ orgUnitId, departmentId }, STATUS_TO_APPROVAL_LEVELS[initialStatus] || []);
+    // PENDING_FINAL_APPROVAL isn't part of the role/org hierarchy at all
+    // (e.g. a Functional Head's own MRF auto-skips straight here) — notify
+    // whoever holds the upload permission instead of the org-scoped chain.
+    const scopedManagers = initialStatus === "PENDING_FINAL_APPROVAL"
+      ? await getUsersWithPermission("UPLOAD_MRF_DOCUMENTS")
+      : await getEligibleApprovers({ orgUnitId, departmentId }, STATUS_TO_APPROVAL_LEVELS[initialStatus] || []);
+    const notifyLink = initialStatus === "PENDING_FINAL_APPROVAL" ? `/dashboard/mrfs/${id}` : `/dashboard/approvals`;
+    const notifyMessage = initialStatus === "PENDING_FINAL_APPROVAL"
+      ? `"${mrf.title}" has been submitted and requires supporting documents to be uploaded.`
+      : `"${mrf.title}" has been submitted and is awaiting ${(STAGE_LEVEL_LABEL[initialStatus] || "").replace(/_/g, " ")} approval.`;
     await Promise.all(
       scopedManagers.map((mgr: any) =>
         db("RECRUIT_T_Notification").insert({
@@ -250,8 +259,8 @@ export async function POST(req: NextRequest) {
           userId: mgr.id,
           type: "MRF_APPROVAL",
           title: `New MRF ${mrf.referenceNumber} requires your approval`,
-          message: `"${mrf.title}" has been submitted and is awaiting ${(STAGE_LEVEL_LABEL[initialStatus] || "").replace(/_/g, " ")} approval.`,
-          link: `/dashboard/approvals`,
+          message: notifyMessage,
+          link: notifyLink,
           createdAt: now,
         })
       )

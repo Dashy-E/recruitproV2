@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
-import { ApprovalLevel, STATUS_TO_APPROVAL_LEVELS } from "@/lib/permissions";
+import { ApprovalLevel, STATUS_TO_APPROVAL_LEVELS, PermissionKey } from "@/lib/permissions";
 import { filterUsersByOrgAccess, userHasOrgAccess } from "@/lib/org-access";
 
 async function isDepartmentFunctionalHead(userId: string, departmentId: string): Promise<boolean> {
@@ -16,7 +16,11 @@ export const MRF_STAGE_ORDER = ["PENDING_DIVISIONAL", "PENDING_COUNTRY_SUPERVISO
 export const STATUS_FLOW: Record<string, string> = {
   PENDING_DIVISIONAL: "PENDING_COUNTRY_SUPERVISOR",
   PENDING_COUNTRY_SUPERVISOR: "PENDING_FUNCTIONAL",
-  PENDING_FUNCTIONAL: "APPROVED",
+  // Functional Head approval no longer lands directly on APPROVED — it now
+  // opens the document-upload + Final Approved/Reject/Hold gate (see
+  // approve/route.ts's "finalApprove"/"hold" actions). The MRF Number is
+  // assigned only once "finalApprove" fires, never here.
+  PENDING_FUNCTIONAL: "PENDING_FINAL_APPROVAL",
 };
 
 // Display/grouping label stored on RECRUIT_T_MRFApprovalRecord.level — the
@@ -62,7 +66,10 @@ export function computeInitialMrfState(creatorApprovalLevel: ApprovalLevel | nul
 
   const skippedStages = MRF_STAGE_ORDER.filter((s) => STAGE_RANK[s] <= rank);
   const remaining = MRF_STAGE_ORDER.filter((s) => STAGE_RANK[s] > rank);
-  return { status: remaining[0] || "APPROVED", skippedStages };
+  // Even a creator who outranks every hierarchy stage still has to pass the
+  // document-upload + Final Approved/Reject/Hold gate — there is no
+  // "skip everything, straight to Approved" path anymore.
+  return { status: remaining[0] || "PENDING_FINAL_APPROVAL", skippedStages };
 }
 
 // Records the hierarchy-based skip as real approval-record rows (not a
@@ -179,4 +186,19 @@ export async function getEligibleApprovers(
   const eligible = orgFiltered.filter((c: any) => c.approvalLevel !== "FUNCTIONAL" || functionalHeadIds.has(c.id));
 
   return [...universal, ...eligible];
+}
+
+// Notification recipients for permission-gated stages that aren't part of
+// the role/org hierarchy above (e.g. the document-upload + Final Approval
+// gate) — a flat "who holds this permission" lookup, unscoped by org, same
+// shape as how SKIP_MRF_APPROVAL already works.
+export async function getUsersWithPermission(
+  permissionKey: PermissionKey
+): Promise<{ id: string; email: string; name: string }[]> {
+  return db("RECRUIT_T_User as u")
+    .join("RECRUIT_T_Role as r", "r.key", "u.role")
+    .join("RECRUIT_T_RolePermission as rp", "rp.roleId", "r.id")
+    .where("rp.permissionKey", permissionKey)
+    .where("u.isActive", 1)
+    .select("u.id", "u.email", "u.name");
 }

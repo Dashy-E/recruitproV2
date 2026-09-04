@@ -12,6 +12,8 @@ export const PERMISSIONS = {
   MANAGE_MRF: "Edit / Restart MRFs",
   SEND_MRF_APPROVAL_EMAIL: "Send MRF Approval Emails",
   SKIP_MRF_APPROVAL: "Skip MRF Approval Level",
+  UPLOAD_MRF_DOCUMENTS: "Upload MRF Supporting Documents",
+  FINAL_APPROVE_MRF: "Final Approve / Reject MRF",
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;

@@ -25,7 +25,7 @@ export default async function DashboardPage() {
     count("RECRUIT_T_Candidate"),
     count("RECRUIT_T_MRF", { status: "APPROVED" }),
     db("RECRUIT_T_MRF")
-      .whereIn("status", ["PENDING_DIVISIONAL", "PENDING_COUNTRY_SUPERVISOR", "PENDING_FUNCTIONAL"])
+      .whereIn("status", ["PENDING_DIVISIONAL", "PENDING_COUNTRY_SUPERVISOR", "PENDING_FUNCTIONAL", "PENDING_FINAL_APPROVAL"])
       .count<{ count: string }[]>("* as count")
       .then((r) => Number(r[0].count)),
   ]);

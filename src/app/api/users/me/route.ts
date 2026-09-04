@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { fromBool } from "@/lib/db-bool";
 import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
+import { getSignedFileUrl } from "@/lib/s3";
 import bcrypt from "bcryptjs";
 
 // Self-service profile — any authenticated user, scoped to their own row.
@@ -40,7 +41,7 @@ export async function GET() {
     role: row.role,
     roleLabel: roleRow?.label || row.role,
     isActive: fromBool(row.isActive),
-    signatureUrl: row.signatureUrl || null,
+    signatureUrl: await getSignedFileUrl(row.signatureUrl),
     createdAt: row.createdAt,
     orgUnits: assignments.map((a: any) => {
       const path = getAncestorPath(a.orgUnitId, orgUnits);

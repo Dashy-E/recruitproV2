@@ -9,22 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Lock } from "lucide-react";
-
-const PERMISSIONS: Record<string, string> = {
-  MANAGE_USERS: "Manage Users",
-  MANAGE_CANDIDATES: "Manage Candidates",
-  MANAGE_DOCUMENTS: "Manage Documents",
-  MANAGE_EMPLOYEES: "Manage Employees",
-  MANAGE_EMAILS: "Manage Emails",
-  VIEW_REPORTS: "View Reports",
-  MANAGE_ORG: "Manage Organization",
-  MANAGE_SETTINGS: "Manage Settings",
-  MANAGE_ROLES: "Manage Roles",
-  CREATE_MRF: "Create MRFs",
-  MANAGE_MRF: "Edit / Restart MRFs",
-  SEND_MRF_APPROVAL_EMAIL: "Send MRF Approval Emails",
-  SKIP_MRF_APPROVAL: "Skip MRF Approval Level",
-};
+import { PERMISSIONS } from "@/lib/permissions";
 
 const NO_APPROVAL_LEVEL = "NONE";
 
@@ -195,7 +180,7 @@ export default function RolesSettingsPage() {
                         ) : (
                           role.permissions.map((p) => (
                             <span key={p} className="rounded-full bg-blue-50 text-blue-700 text-xs px-2 py-0.5">
-                              {PERMISSIONS[p] || p}
+                              {(PERMISSIONS as Record<string, string>)[p] || p}
                             </span>
                           ))
                         )}

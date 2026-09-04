@@ -32,6 +32,7 @@ const STATUS_COLORS: Record<string, string> = {
   PENDING_DIVISIONAL: "warning",
   PENDING_COUNTRY_SUPERVISOR: "warning",
   PENDING_FUNCTIONAL: "warning",
+  PENDING_FINAL_APPROVAL: "warning",
   APPROVED: "success",
   REJECTED: "destructive",
 };

@@ -7,13 +7,14 @@ import { STATUS_TO_APPROVAL_LEVELS, ApprovalLevel, hasPermission } from "@/lib/p
 import {
   isDesignatedApproverForStage,
   getEligibleApprovers,
+  getUsersWithPermission,
   STATUS_FLOW,
   STAGE_LEVEL_LABEL as LEVEL_LABEL,
 } from "@/lib/mrf-approval";
 import { generateMRFNumber } from "@/lib/mrf-number";
 import nodemailer from "nodemailer";
 
-async function sendApprovalEmail(toEmail: string, toName: string, referenceNumber: string, mrfTitle: string) {
+async function sendApprovalEmail(toEmail: string, toName: string, referenceNumber: string, mrfTitle: string, link: string = "/dashboard/approvals") {
   if (!process.env.SMTP_HOST) return;
   try {
     const transport = nodemailer.createTransport({
@@ -26,7 +27,7 @@ async function sendApprovalEmail(toEmail: string, toName: string, referenceNumbe
       from: process.env.SMTP_FROM || "noreply@recruitpro.com",
       to: toEmail,
       subject: `Action Required: MRF ${referenceNumber} awaiting your approval`,
-      text: `Dear ${toName},\n\nMRF "${mrfTitle}" (${referenceNumber}) has been forwarded for your approval.\n\nPlease log in to review:\n${process.env.NEXTAUTH_URL}/dashboard/approvals\n\nThank you,\nRecruitPro ERP`,
+      text: `Dear ${toName},\n\nMRF "${mrfTitle}" (${referenceNumber}) has been forwarded for your approval.\n\nPlease log in to review:\n${process.env.NEXTAUTH_URL}${link}\n\nThank you,\nRecruitPro ERP`,
     });
   } catch { /* SMTP failure is non-fatal */ }
 }
@@ -79,13 +80,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // being the designated approver for this stage (e.g. their location's
   // Country Supervisor is unavailable, so someone with SKIP_MRF_APPROVAL
   // pushes it to the next stage instead).
+  //
+  // PENDING_FINAL_APPROVAL is a different kind of stage entirely — it isn't
+  // part of the DIVISIONAL/SUPERVISOR/FUNCTIONAL role ladder at all, so
+  // isDesignatedApproverForStage can never match it. Authorization there is
+  // purely FINAL_APPROVE_MRF permission, same shape as Skip.
   const isUniversalApprover = approvalLevel === "ANY";
+  const isFinalApprovalStage = mrf.status === "PENDING_FINAL_APPROVAL";
   let isManagerForThisLevel = false;
 
   if (action === "skip") {
     if (!hasPermission(session, "SKIP_MRF_APPROVAL")) {
       return NextResponse.json({ error: "You do not have permission to skip approval levels" }, { status: 403 });
     }
+  } else if (action === "hold") {
+    if (!isFinalApprovalStage || !hasPermission(session, "FINAL_APPROVE_MRF")) {
+      return NextResponse.json({ error: "You do not have permission to place this MRF on hold" }, { status: 403 });
+    }
+  } else if (isFinalApprovalStage) {
+    if (!hasPermission(session, "FINAL_APPROVE_MRF")) {
+      return NextResponse.json({ error: "You do not have permission to make the final approval decision" }, { status: 403 });
+    }
+    isManagerForThisLevel = true;
   } else {
     isManagerForThisLevel = await isDesignatedApproverForStage(userId, approvalLevel, mrf);
     if (!isUniversalApprover && !isManagerForThisLevel) {
@@ -93,8 +109,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
+  // The final-approval gate requires the document-upload step to have
+  // happened first — enforced here (not just hidden in the UI) so a direct
+  // API call can't skip straight to a decision with nothing uploaded.
+  if (isFinalApprovalStage && ["finalApprove", "reject", "hold"].includes(action)) {
+    const hasDocument = await db("RECRUIT_T_Document").where({ mrfId: id }).first();
+    if (!hasDocument) {
+      return NextResponse.json({ error: "At least one supporting document must be uploaded before a final decision can be made" }, { status: 400 });
+    }
+  }
+
   const resolvedApproverName = (isManagerForThisLevel || isUniversalApprover) ? userName : (approverName || "External Approver");
-  const currentLevel = LEVEL_LABEL[mrf.status];
+  const currentLevel = isFinalApprovalStage ? "FINAL_APPROVAL" : LEVEL_LABEL[mrf.status];
   const now = new Date();
   const recordId = newId();
 
@@ -148,17 +174,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (nextStatus !== "APPROVED") {
         // Notify every active user eligible to act at the next stage — same
         // org/department eligibility rules as the authorization check above.
-        const recipients = await getEligibleApprovers(mrf, STATUS_TO_APPROVAL_LEVELS[nextStatus] || []);
+        // PENDING_FINAL_APPROVAL isn't part of that role/org ladder at all
+        // (STATUS_TO_APPROVAL_LEVELS has no entry for it), so it notifies
+        // whoever holds the upload permission instead.
+        const recipients = nextStatus === "PENDING_FINAL_APPROVAL"
+          ? await getUsersWithPermission("UPLOAD_MRF_DOCUMENTS")
+          : await getEligibleApprovers(mrf, STATUS_TO_APPROVAL_LEVELS[nextStatus] || []);
         const verb = recordStatus === "SKIPPED" ? `had its ${currentLevel.replace(/_/g, " ")} level skipped by ${actorName} and` : `has been approved at ${currentLevel.replace(/_/g, " ")} level and`;
+        const recipientLink = nextStatus === "PENDING_FINAL_APPROVAL" ? `/dashboard/mrfs/${id}` : `/dashboard/approvals`;
+        const recipientAction = nextStatus === "PENDING_FINAL_APPROVAL" ? "requires supporting documents to be uploaded." : "requires your review.";
 
         await Promise.all(recipients.map(async (approver: any) => {
           await createNotification(
             approver.id,
             `MRF ${mrf.referenceNumber} awaiting your approval`,
-            `"${mrf.title}" ${verb} requires your review.`,
-            `/dashboard/approvals`
+            `"${mrf.title}" ${verb} ${recipientAction}`,
+            recipientLink
           );
-          await sendApprovalEmail(approver.email, approver.name, mrf.referenceNumber, mrf.title);
+          await sendApprovalEmail(approver.email, approver.name, mrf.referenceNumber, mrf.title, recipientLink);
         }));
       } else {
         const suffix = recordStatus === "SKIPPED" ? ` (final level skipped by ${actorName})` : "";
@@ -173,7 +206,65 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   if (action === "approve") {
+    if (isFinalApprovalStage) {
+      return NextResponse.json({ error: "Use the Final Approve action for this stage" }, { status: 400 });
+    }
     await advanceStage("APPROVED", isManagerForThisLevel ? userId : null, resolvedApproverName, notes || null);
+
+  } else if (action === "finalApprove") {
+    const assignedMrfNumber = await generateMRFNumber();
+    await db.transaction(async (trx) => {
+      await trx("RECRUIT_T_MRFApprovalRecord").insert({
+        id: recordId,
+        mrfId: id,
+        level: currentLevel,
+        approverRole: role,
+        approverName: resolvedApproverName,
+        approverDesignation: approverDesignation || null,
+        approverId: userId,
+        status: "APPROVED",
+        notes: notes || null,
+        recordedById: userId,
+        recordedAt: now,
+      });
+
+      await trx("RECRUIT_T_MRF")
+        .where({ id })
+        .update({
+          status: "APPROVED",
+          approvedAt: now,
+          mrfNumber: assignedMrfNumber,
+          updatedAt: now,
+        });
+    });
+
+    await createNotification(
+      mrf.createdById,
+      `MRF ${mrf.referenceNumber} approved`,
+      `Your MRF "${mrf.title}" (${mrf.referenceNumber}) has been finally approved and assigned MRF number ${assignedMrfNumber}.`,
+      `/dashboard/mrfs/${id}`
+    );
+
+  } else if (action === "hold") {
+    if (!notes?.trim()) {
+      return NextResponse.json({ error: "A reason is required to place this MRF on hold" }, { status: 400 });
+    }
+    // No MRF status change — leaving it at PENDING_FINAL_APPROVAL is exactly
+    // what keeps Final Approve/Reject available afterward, since those are
+    // only blocked once the MRF actually reaches a terminal status.
+    await db("RECRUIT_T_MRFApprovalRecord").insert({
+      id: recordId,
+      mrfId: id,
+      level: currentLevel,
+      approverRole: role,
+      approverName: resolvedApproverName,
+      approverDesignation: approverDesignation || null,
+      approverId: userId,
+      status: "HELD",
+      notes: notes.trim(),
+      recordedById: userId,
+      recordedAt: now,
+    });
 
   } else if (action === "skip") {
     if (!notes?.trim()) {

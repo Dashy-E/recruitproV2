@@ -6,6 +6,7 @@ import { newId } from "@/lib/id";
 import { fromBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
+import { getSignedFileUrl } from "@/lib/s3";
 import bcrypt from "bcryptjs";
 
 export async function GET() {
@@ -26,7 +27,7 @@ export async function GET() {
     db("RECRUIT_T_DepartmentFunctionalHead").select("userId", "departmentId"),
   ]);
 
-  const users = rows.map((r: any) => ({
+  const users = await Promise.all(rows.map(async (r: any) => ({
     id: r.id,
     name: r.name,
     userName: r.userName,
@@ -34,7 +35,7 @@ export async function GET() {
     role: r.role,
     isActive: fromBool(r.isActive),
     createdAt: r.createdAt,
-    signatureUrl: r.signatureUrl || null,
+    signatureUrl: await getSignedFileUrl(r.signatureUrl),
     orgUnits: assignments
       .filter((a: any) => a.userId === r.id)
       .map((a: any) => {
@@ -44,7 +45,7 @@ export async function GET() {
     // A user can technically be mapped to more than one department, but the
     // Add/Edit User UI only ever manages a single one — take the first.
     departmentId: functionalHeadRows.find((f: any) => f.userId === r.id)?.departmentId ?? null,
-  }));
+  })));
 
   return NextResponse.json(users);
 }

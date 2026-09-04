@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, User } from "lucide-react";
+import { Loader2, User, Trash2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
 interface Profile {
@@ -36,6 +36,7 @@ export default function ProfilePage() {
   const [signatureFile, setSignatureFile] = useState<File | null>(null);
   const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState("");
+  const [deletingSignature, setDeletingSignature] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -68,6 +69,22 @@ export default function ProfilePage() {
     }
     setSignatureFile(file);
     setSignaturePreview(URL.createObjectURL(file));
+  };
+
+  const handleDeleteSignature = async () => {
+    if (!profile) return;
+    setDeletingSignature(true);
+    setSignatureError("");
+    const res = await fetch(`/api/users/${profile.id}/signature`, { method: "DELETE" });
+    setDeletingSignature(false);
+    if (res.ok) {
+      setSignatureFile(null);
+      setSignaturePreview(null);
+      fetchProfile();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setSignatureError(data.error || "Failed to delete signature.");
+    }
   };
 
   const handleSave = async () => {
@@ -207,6 +224,19 @@ export default function ProfilePage() {
               </div>
             )}
             <Input type="file" accept="image/png,image/jpeg" onChange={handleSignatureFileChange} className="max-w-xs" />
+            {profile.signatureUrl && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleDeleteSignature}
+                disabled={deletingSignature}
+                className="text-red-600 border-red-200 hover:bg-red-50"
+              >
+                {deletingSignature ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                Delete
+              </Button>
+            )}
           </div>
           {signatureError && <p className="text-xs text-red-500">{signatureError}</p>}
         </CardContent>
