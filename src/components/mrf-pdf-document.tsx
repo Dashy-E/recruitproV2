@@ -313,14 +313,17 @@ export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
           <Field label="Subordinates" value="" flex={1} />
         </View>
         <View style={styles.row}>
+          <Field label="No. required" value={String(mrf.vacancyCount)} flex={1} />
+          <Field label="Position to be filled latest (by date)" value="" flex={1} />
+        </View>
+        <View style={styles.row}>
           <Field label="Job profile (attach detailed JD for new positions)" value={mrf.jobProfile || ""} valueStyle={styles.valueTall} />
         </View>
         <View style={styles.row}>
           <Text style={styles.valueBlankLine}> </Text>
         </View>
         <View style={styles.row}>
-          <Field label="No. required" value={String(mrf.vacancyCount)} flex={1} />
-          <Field label="Position to be filled latest (by date)" value="" flex={1} />
+          <Text style={styles.valueBlankLine}> </Text>
         </View>
 
         <Text style={styles.sectionHeader}>SPECIFICATIONS</Text>

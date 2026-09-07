@@ -430,13 +430,15 @@ export default function MRFDetailPage() {
         </div>
       )}
 
-      {isFinalApprovalStage && (
+      {(isFinalApprovalStage || mrf.documents.length > 0) && (
         <Card className="print:hidden">
           <CardHeader>
             <CardTitle>Supporting Documents</CardTitle>
-            <p className="text-sm text-gray-500">
-              Upload supporting files before a final decision can be made. Accepted formats: PDF, PNG, JPG, JPEG.
-            </p>
+            {isFinalApprovalStage && (
+              <p className="text-sm text-gray-500">
+                Upload supporting files before a final decision can be made. Accepted formats: PDF, PNG, JPG, JPEG.
+              </p>
+            )}
           </CardHeader>
           <CardContent className="space-y-3">
             {mrf.documents.length > 0 ? (
