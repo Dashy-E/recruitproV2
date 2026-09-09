@@ -18,7 +18,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { id } = await params;
   const { toEmail, message } = await req.json();
-  if (!toEmail) return NextResponse.json({ error: "toEmail is required" }, { status: 400 });
+  const recipients = [...new Set((Array.isArray(toEmail) ? toEmail : [toEmail]).filter(Boolean).map((e: string) => e.trim()))] as string[];
+  if (!recipients.length) return NextResponse.json({ error: "At least one recipient email is required" }, { status: 400 });
 
   const mrf = await db("RECRUIT_T_MRF as m")
     .leftJoin("RECRUIT_T_Department as dep", "dep.id", "m.departmentId")
@@ -84,7 +85,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       });
       await transporter.sendMail({
         from: process.env.SMTP_FROM || "noreply@recruitpro.com",
-        to: toEmail,
+        to: recipients.join(", "),
         subject: subjectLine,
         text: emailBody,
       });
@@ -93,18 +94,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
-  // Record in Email table
+  // Record in Email table — one row per recipient so each address is
+  // individually auditable, even though only a single SMTP send went out.
   try {
-    await db("RECRUIT_T_Email").insert({
-      id: newId(),
-      fromId: userId,
-      toEmail,
-      subject: subjectLine,
-      body: emailBody,
-      isRead: 0,
-      mrfId: id,
-      sentAt: new Date(),
-    });
+    await Promise.all(
+      recipients.map((toEmailAddr) =>
+        db("RECRUIT_T_Email").insert({
+          id: newId(),
+          fromId: userId,
+          toEmail: toEmailAddr,
+          subject: subjectLine,
+          body: emailBody,
+          isRead: 0,
+          mrfId: id,
+          sentAt: new Date(),
+        })
+      )
+    );
   } catch (err) {
     console.error("Email record insert failed:", err);
   }

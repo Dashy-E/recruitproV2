@@ -106,7 +106,7 @@ const styles = StyleSheet.create({
   label: { marginRight: 4, color: MUTED },
   rowLabel: { color: MUTED },
   value: { flex: 1, borderBottom: `0.75pt solid ${RULE}`, paddingBottom: 2, minHeight: 12, color: "#111827", fontWeight: 600 },
-  valueTall: { flex: 1, borderBottom: `0.75pt solid ${RULE}`, paddingBottom: 2, minHeight: 22, color: "#111827", fontWeight: 600 },
+  valueTall: { flex: 1, borderBottom: `0.75pt solid ${RULE}`, paddingBottom: 2, minHeight: 12, color: "#111827", fontWeight: 600 },
   valueBlankLine: { flex: 1, borderBottom: `0.75pt solid ${RULE}`, minHeight: 12 },
 
   checkboxGroup: { flexDirection: "row", alignItems: "center" },
@@ -219,13 +219,21 @@ export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
   const creatorSignatureUrl = mrf.createdBy?.signatureUrl || null;
 
   // One signature slot per approval stage (see MRF_STAGE_ORDER/STAGE_LEVEL_LABEL
-  // in src/lib/mrf-approval.ts). Auto-approved (hierarchy skip) and skipped
-  // (permission-based skip) records are excluded — each line should only
-  // reflect a genuine approval action, staying blank otherwise.
+  // in src/lib/mrf-approval.ts). Auto-approved (hierarchy skip) records stay
+  // blank — no one actually signed off. A permission-based skip (SKIP_MRF_APPROVAL)
+  // is different: someone explicitly acted, so their name prints as
+  // "Skipped-<name>" in place of a real signature.
   function stageSignature(level: string) {
     const record = mrf.approvalRecords.find((r) => r.level === level && r.status === "APPROVED" && !r.isAutoApproved);
-    const designation = record?.approverDesignation || (record?.approverRole ? record.approverRole.replace(/_/g, " ") : null);
-    return { approverName: record?.approverName || null, designation, signatureUrl: record?.approver?.signatureUrl || null };
+    if (record) {
+      const designation = record.approverDesignation || (record.approverRole ? record.approverRole.replace(/_/g, " ") : null);
+      return { approverName: record.approverName || null, designation, signatureUrl: record.approver?.signatureUrl || null };
+    }
+    const skipped = mrf.approvalRecords.find((r) => r.level === level && r.status === "SKIPPED");
+    if (skipped?.approverName) {
+      return { approverName: `Skipped-${skipped.approverName}`, designation: null, signatureUrl: null };
+    }
+    return { approverName: null, designation: null, signatureUrl: null };
   }
   const divisional = stageSignature("DIVISIONAL_MANAGER");
   const countrySupervisor = stageSignature("COUNTRY_SUPERVISOR");
@@ -316,8 +324,9 @@ export function MRFPdfDocument({ mrf }: { mrf: MRFPdfData }) {
           <Field label="No. required" value={String(mrf.vacancyCount)} flex={1} />
           <Field label="Position to be filled latest (by date)" value="" flex={1} />
         </View>
-        <View style={styles.row}>
-          <Field label="Job profile (attach detailed JD for new positions)" value={mrf.jobProfile || ""} valueStyle={styles.valueTall} />
+        <View style={[styles.row, { alignItems: "flex-start" }]}>
+          <Text style={styles.label}>Job profile (attach detailed JD for new positions):</Text>
+          <Text style={styles.valueTall}>{mrf.jobProfile || ""}</Text>
         </View>
         <View style={styles.row}>
           <Text style={styles.valueBlankLine}> </Text>

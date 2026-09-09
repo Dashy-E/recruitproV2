@@ -209,7 +209,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (isFinalApprovalStage) {
       return NextResponse.json({ error: "Use the Final Approve action for this stage" }, { status: 400 });
     }
-    await advanceStage("APPROVED", isManagerForThisLevel ? userId : null, resolvedApproverName, notes || null);
+    await advanceStage("APPROVED", userId, resolvedApproverName, notes || null);
 
   } else if (action === "finalApprove") {
     const assignedMrfNumber = await generateMRFNumber();
@@ -281,7 +281,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         approverRole: role,
         approverName: resolvedApproverName,
         approverDesignation: approverDesignation || null,
-        approverId: isManagerForThisLevel ? userId : null,
+        approverId: userId,
         status: "REJECTED",
         notes: notes || null,
         recordedById: userId,

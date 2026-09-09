@@ -87,6 +87,12 @@ const NEXT_LEVEL_LABEL: Record<string, string> = {
   PENDING_FINAL_APPROVAL: "Document Upload Team",
 };
 
+// Fixed FYI recipients suggested once an MRF reaches Final Approval — the
+// Functional Head has just cleared it and it now needs the Document Upload
+// Team's attention. Pre-checked suggestions, not the only option: the sender
+// can still uncheck any of these or add more addresses manually below.
+const FINAL_APPROVAL_SUGGESTED_EMAILS = ["somani@mitrask.com", "rinki.bhattacharya@mitrask.com", "sagarb@mitrask.com"];
+
 export default function MRFDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: session } = useSession();
@@ -115,16 +121,17 @@ export default function MRFDetailPage() {
 
   // Send-to-next-approver modal (shown after successful approval when MRF still pending)
   const [sendNextOpen, setSendNextOpen] = useState(false);
-  const [nextApproverEmail, setNextApproverEmail] = useState("");
+  // Multi-recipient: suggested addresses (org/role-eligible approvers, or the
+  // hardcoded Final Approval FYI list) are checkboxes; anything typed into
+  // manualEmailInput gets appended to the same list on Add/Enter.
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [manualEmailInput, setManualEmailInput] = useState("");
   const [nextApproverMessage, setNextApproverMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [postApprovalStatus, setPostApprovalStatus] = useState("");
   const [eligibleApprovers, setEligibleApprovers] = useState<{ id: string; name: string; email: string }[]>([]);
   const [loadingApprovers, setLoadingApprovers] = useState(false);
-  // Lets the sender correct the email inline if the selected approver's
-  // address on file is wrong, instead of being locked to the dropdown value.
-  const [editingApproverEmail, setEditingApproverEmail] = useState(false);
 
   // Reminder hold ("snooze") state
   const [holding, setHolding] = useState(false);
@@ -174,17 +181,26 @@ export default function MRFDetailPage() {
 
   // Who's eligible to act at the MRF's current pending stage — same
   // org/department-scoped rules used to pick auto-notification recipients,
-  // surfaced here so "send to next approver" is a dropdown, not free text.
+  // surfaced here as suggested (checkbox) recipients rather than free text.
   useEffect(() => {
     if (!sendNextOpen) return;
+    setManualEmailInput("");
+    // Final Approval isn't part of the org/role ladder (see
+    // isFinalApprovalStage above), so there's no eligible-approvers list for
+    // it — pre-check the fixed FYI addresses instead, still editable.
+    if (postApprovalStatus === "PENDING_FINAL_APPROVAL") {
+      setEligibleApprovers([]);
+      setSelectedRecipients([...FINAL_APPROVAL_SUGGESTED_EMAILS]);
+      setLoadingApprovers(false);
+      return;
+    }
+    setSelectedRecipients([]);
     setLoadingApprovers(true);
-    setNextApproverEmail("");
-    setEditingApproverEmail(false);
     fetch(`/api/mrfs/${id}/eligible-approvers`)
       .then((r) => r.json())
       .then((d) => setEligibleApprovers(Array.isArray(d) ? d : []))
       .finally(() => setLoadingApprovers(false));
-  }, [sendNextOpen, id]);
+  }, [sendNextOpen, id, postApprovalStatus]);
 
   const openApprovalDialog = (action: "approve" | "reject" | "skip" | "finalApprove" | "hold") => {
     setApproverName(session?.user?.name || "");
@@ -218,20 +234,33 @@ export default function MRFDetailPage() {
     }
   };
 
+  const addManualEmail = () => {
+    const email = manualEmailInput.trim();
+    if (!email) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setSendError("Please enter a valid email address.");
+      return;
+    }
+    setSendError("");
+    setSelectedRecipients((prev) => (prev.includes(email) ? prev : [...prev, email]));
+    setManualEmailInput("");
+  };
+
   const handleSendNext = async () => {
-    if (!nextApproverEmail) return;
+    if (!selectedRecipients.length) return;
     setSending(true);
     setSendError("");
     const res = await fetch(`/api/mrfs/${id}/send-approval-email`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toEmail: nextApproverEmail, message: nextApproverMessage }),
+      body: JSON.stringify({ toEmail: selectedRecipients, message: nextApproverMessage }),
     });
     setSending(false);
     if (res.ok) {
       setSendNextOpen(false);
-      setNextApproverEmail(""); setNextApproverMessage("");
-      toast({ variant: "success", title: "Email sent", description: `Notification sent to ${nextApproverEmail}.` });
+      const sentTo = selectedRecipients.join(", ");
+      setSelectedRecipients([]); setNextApproverMessage("");
+      toast({ variant: "success", title: "Email sent", description: `Notification sent to ${sentTo}.` });
     } else {
       const data = await res.json().catch(() => ({}));
       setSendError(data.error || "Failed to send email.");
@@ -303,11 +332,14 @@ export default function MRFDetailPage() {
 
   const statusInfo = MRF_STATUSES[mrf.status as keyof typeof MRF_STATUSES];
   const nextLevelLabel = NEXT_LEVEL_LABEL[postApprovalStatus] || "Next Approver";
+  const suggestedRecipients = postApprovalStatus === "PENDING_FINAL_APPROVAL"
+    ? FINAL_APPROVAL_SUGGESTED_EMAILS.map((email) => ({ id: email, name: email, email }))
+    : eligibleApprovers;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:items-start">
+      <div className="flex flex-col gap-3 print:hidden lg:flex-row lg:items-start">
         <div className="flex items-start gap-3 flex-1 min-w-0">
           <Link href="/dashboard/mrfs">
             <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
@@ -315,38 +347,40 @@ export default function MRFDetailPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
               <h2 className="text-2xl font-bold text-gray-900">{mrf.title}</h2>
-              <span className={`rounded-full px-3 py-1 text-xs font-medium ${statusInfo?.color}`}>
+              <span className={`rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap ${statusInfo?.color}`}>
                 {statusInfo?.label || mrf.status}
               </span>
               {mrf.isOnHold && (
-                <span className="rounded-full px-3 py-1 text-xs font-medium bg-purple-100 text-purple-700 flex items-center gap-1">
+                <span className="rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap bg-purple-100 text-purple-700 flex items-center gap-1">
                   <Clock className="h-3 w-3" />
                   On hold{mrf.heldBy ? ` by ${mrf.heldBy.name}` : ""}
                   {mrf.holdIndefinite ? " until changed" : mrf.holdUntil ? ` until ${formatDate(mrf.holdUntil)}` : ""}
                 </span>
               )}
             </div>
-            <p className="text-sm text-gray-500 font-mono mt-1">
+            <p className="text-sm text-gray-500 font-mono mt-1 whitespace-nowrap">
               Ref: {mrf.referenceNumber}
               {mrf.mrfNumber && <> · MRF No: {mrf.mrfNumber}</>}
             </p>
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={() => setPdfPreviewOpen(true)} className="print:hidden">
-            <FileText className="h-4 w-4" /> Preview MRF
-          </Button>
-          {mrf.status === "REJECTED" && canManageMrf && (
-            <>
-              <Link href={`/dashboard/mrfs/${id}/edit`}>
-                <Button variant="outline">
-                  <Pencil className="h-4 w-4" /> Edit
-                </Button>
-              </Link>
-              <Button variant="outline" onClick={() => setRestartConfirmOpen(true)} className="text-blue-600 border-blue-200 hover:bg-blue-50">
-                <RefreshCw className="h-4 w-4" /> Restart Approval
+          {mrf.status !== "APPROVED" && (
+            <Button variant="outline" onClick={() => setPdfPreviewOpen(true)} className="print:hidden">
+              <FileText className="h-4 w-4" /> Preview MRF
+            </Button>
+          )}
+          {(mrf.status === "REJECTED" || mrf.status === "PENDING_DIVISIONAL") && canManageMrf && (
+            <Link href={`/dashboard/mrfs/${id}/edit`}>
+              <Button variant="outline">
+                <Pencil className="h-4 w-4" /> Edit
               </Button>
-            </>
+            </Link>
+          )}
+          {mrf.status === "REJECTED" && canManageMrf && (
+            <Button variant="outline" onClick={() => setRestartConfirmOpen(true)} className="text-blue-600 border-blue-200 hover:bg-blue-50">
+              <RefreshCw className="h-4 w-4" /> Restart Approval
+            </Button>
           )}
           {canAct && (
             <>
@@ -745,45 +779,67 @@ export default function MRFDetailPage() {
               Send them an email with the direct MRF link.
             </div>
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Approver *</Label>
-                {!loadingApprovers && eligibleApprovers.length > 0 && (
-                  <button
-                    type="button"
-                    className="flex items-center gap-1 text-xs text-blue-600 hover:underline"
-                    onClick={() => setEditingApproverEmail((v) => !v)}
-                  >
-                    <Pencil className="h-3 w-3" />
-                    {editingApproverEmail ? "Choose from list" : "Wrong email? Edit"}
-                  </button>
-                )}
-              </div>
+              <Label>Recipients * <span className="font-normal text-gray-400">(select any, or add your own)</span></Label>
               {loadingApprovers ? (
                 <div className="flex items-center gap-2 text-sm text-gray-500 py-2">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading eligible approvers…
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading suggested recipients…
                 </div>
-              ) : eligibleApprovers.length > 0 && !editingApproverEmail ? (
-                <Select value={nextApproverEmail} onValueChange={setNextApproverEmail}>
-                  <SelectTrigger><SelectValue placeholder="Select an approver" /></SelectTrigger>
-                  <SelectContent>
-                    {eligibleApprovers.map((a) => (
-                      <SelectItem key={a.id} value={a.email}>{a.name} — {a.email}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               ) : (
                 <>
-                  {eligibleApprovers.length === 0 && (
+                  {suggestedRecipients.length === 0 && (
                     <p className="text-xs text-amber-600">
-                      No eligible approver found with org/department access for this stage — enter an email manually.
+                      No suggested recipients for this stage — add an email manually below.
                     </p>
                   )}
-                  <Input
-                    type="email"
-                    placeholder="next.approver@company.com"
-                    value={nextApproverEmail}
-                    onChange={(e) => setNextApproverEmail(e.target.value)}
-                  />
+                  {suggestedRecipients.length > 0 && (
+                    <div className="space-y-1.5">
+                      {suggestedRecipients.map((a) => (
+                        <label key={a.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={selectedRecipients.includes(a.email)}
+                            onChange={(e) =>
+                              setSelectedRecipients((prev) =>
+                                e.target.checked ? [...prev, a.email] : prev.filter((em) => em !== a.email)
+                              )
+                            }
+                          />
+                          {a.name !== a.email ? `${a.name} — ${a.email}` : a.email}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Input
+                      type="email"
+                      placeholder="Add an email address..."
+                      value={manualEmailInput}
+                      onChange={(e) => setManualEmailInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); addManualEmail(); }
+                      }}
+                    />
+                    <Button type="button" variant="outline" onClick={addManualEmail}>Add</Button>
+                  </div>
+                  {selectedRecipients.filter((em) => !suggestedRecipients.some((a) => a.email === em)).length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {selectedRecipients
+                        .filter((em) => !suggestedRecipients.some((a) => a.email === em))
+                        .map((em) => (
+                          <span key={em} className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-xs text-blue-700">
+                            {em}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedRecipients((prev) => prev.filter((x) => x !== em))}
+                              className="text-blue-400 hover:text-blue-600"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -802,7 +858,7 @@ export default function MRFDetailPage() {
             <Button variant="outline" onClick={() => setSendNextOpen(false)}>
               Skip
             </Button>
-            <Button onClick={handleSendNext} disabled={!nextApproverEmail || sending}>
+            <Button onClick={handleSendNext} disabled={!selectedRecipients.length || sending}>
               {sending && <Loader2 className="h-4 w-4 animate-spin" />}
               <Send className="h-4 w-4" />
               Send Email

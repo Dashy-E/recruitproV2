@@ -154,7 +154,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (data[field] !== undefined && data[field] !== null) data[field] = toBool(data[field] as boolean);
   }
 
-  const [mrf] = await db("RECRUIT_T_MRF").where({ id }).update(data).returning("*");
+  // NOTE: .returning("*") on this UPDATE hits an Oracle/oracledb bind-count
+  // mismatch (NJS-098) once the column count gets this large — INSERT...
+  // RETURNING on the same table doesn't hit it, only UPDATE...RETURNING does.
+  // Plain update + re-select sidesteps it.
+  await db("RECRUIT_T_MRF").where({ id }).update(data);
+  const mrf = await db("RECRUIT_T_MRF").where({ id }).first();
 
   return NextResponse.json(mrf);
 }

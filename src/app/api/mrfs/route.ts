@@ -9,6 +9,7 @@ import { getAllOrgUnits, getAncestorPath, getAccessibleOrgUnitIds, expandDescend
 import { generateReferenceNumber, generateMRFNumber } from "@/lib/mrf-number";
 import { getEligibleApprovers, getUsersWithPermission, isDesignatedApproverForStage, computeInitialMrfState, insertAutoApprovalRecords, STAGE_LEVEL_LABEL } from "@/lib/mrf-approval";
 import { ApprovalLevel, STATUS_TO_APPROVAL_LEVELS } from "@/lib/permissions";
+import nodemailer from "nodemailer";
 
 async function attachRelations(mrfs: any[], requestingUserId: string, requestingApprovalLevel: ApprovalLevel | null, includeApprovalRecords: boolean) {
   if (!mrfs.length) return [];
@@ -236,6 +237,45 @@ export async function POST(req: NextRequest) {
     department: department || null,
     createdBy: creator ? { name: creator.name } : null,
   };
+
+  // Fixed FYI distribution list for every new MRF — unrelated to the
+  // approval-chain notifications below, always sent to the same hardcoded
+  // addresses regardless of who's eligible to act, split by whether the MRF
+  // was raised under the "Overseas" root org unit or not.
+  const rootOrgName = orgUnitPath[0]?.name;
+  const fixedRecipients = rootOrgName === "Overseas"
+    ? ["somani@mitrask.com", "rinki.bhattacharya@mitrask.com"]
+    : ["rinki.bhattacharya@mitrask.com", "sagarb@mitrask.com"];
+
+  if (process.env.SMTP_HOST) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT || "587"),
+        secure: process.env.SMTP_SECURE === "true",
+        auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      });
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM || "noreply@recruitpro.com",
+        to: fixedRecipients,
+        subject: `New MRF Raised: ${mrf.referenceNumber} — ${mrf.title}`,
+        text: [
+          `A new MRF has been raised.`,
+          ``,
+          `Reference : ${mrf.referenceNumber}`,
+          `Title     : ${mrf.title}`,
+          `Location  : ${orgUnitPath.map((p) => p.name).join(" / ")}`,
+          `Department: ${department?.name || "—"}`,
+          `Vacancies : ${mrf.vacancyCount}`,
+          `Raised By : ${creator?.name || "—"}`,
+          ``,
+          `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/dashboard/mrfs/${id}`,
+        ].join("\n"),
+      });
+    } catch (err) {
+      console.error("MRF creation notification email failed:", err);
+    }
+  }
 
   // Notify whoever the chain actually starts at (may not be stage 1, if the
   // creator's own seniority skipped ahead) — same eligibility rules used to
