@@ -45,10 +45,14 @@ export const authOptions: NextAuthOptions = {
           .where({ userName: credentials.userName })
           .first();
 
-        if (!user || !fromBool(user.isActive)) return null;
+        // Distinct messages for "not activated" and "wrong password" — but
+        // an unknown username still falls back to the generic message
+        // rather than confirming/denying whether that username exists.
+        if (!user) throw new Error("Invalid username or password.");
+        if (!fromBool(user.isActive)) throw new Error("Your account is not activated yet.");
 
         const isValid = await bcrypt.compare(credentials.password, user.password);
-        if (!isValid) return null;
+        if (!isValid) throw new Error("Invalid username or password.");
 
         return {
           id: user.id,

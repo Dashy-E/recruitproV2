@@ -107,6 +107,12 @@ const navItems: NavItem[] = [
     visible: (ctx) => has(ctx, "MANAGE_CANDIDATES"),
   },
   {
+    label: "Employees",
+    href: "/dashboard/employees",
+    icon: UserCheck,
+    visible: (ctx) => has(ctx, "MANAGE_EMPLOYEES"),
+  },
+  {
     label: "Document Center",
     href: "/dashboard/documents",
     icon: FolderOpen,
@@ -154,12 +160,6 @@ const navItems: NavItem[] = [
     href: "/dashboard/users",
     icon: Users,
     visible: (ctx) => has(ctx, "MANAGE_USERS"),
-  },
-  {
-    label: "Employees",
-    href: "/dashboard/employees",
-    icon: UserCheck,
-    visible: (ctx) => has(ctx, "MANAGE_EMPLOYEES"),
   },
   {
     label: "Email",

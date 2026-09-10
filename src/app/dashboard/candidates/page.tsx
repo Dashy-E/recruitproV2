@@ -13,11 +13,12 @@ import { Label } from "@/components/ui/label";
 import { Plus, Search, Users, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import { CANDIDATE_STAGES, formatDate } from "@/lib/utils";
 import { Suspense } from "react";
+import { toast } from "@/hooks/use-toast";
 
 interface Candidate {
   id: string; firstName: string; lastName: string; email: string; phone: string | null;
   currentStage: string; candidateStatus: string; statusNote: string | null;
-  aiScore: number | null; createdAt: string; interviewDate: string | null;
+  createdAt: string; interviewDate: string | null;
   mrf: {
     id: string; title: string;
     department: { name: string };
@@ -133,13 +134,6 @@ function CandidateRow({ c }: { c: Candidate }) {
           )}
         </div>
       </TableCell>
-      <TableCell>
-        {c.aiScore != null ? (
-          <span className={`font-medium text-sm ${c.aiScore >= 70 ? "text-green-600" : "text-orange-600"}`}>
-            {c.aiScore.toFixed(1)}%
-          </span>
-        ) : "—"}
-      </TableCell>
       <TableCell className="text-sm text-gray-500">{formatDate(c.createdAt)}</TableCell>
       <TableCell>
         <Link href={`/dashboard/candidates/${c.id}`} className="text-blue-600 hover:underline text-sm">
@@ -160,7 +154,6 @@ function CandidateTable({ candidates }: { candidates: Candidate[] }) {
           <TableHead>Email</TableHead>
           <TableHead>MRF / Position</TableHead>
           <TableHead>Stage / Status</TableHead>
-          <TableHead>AI Score</TableHead>
           <TableHead>Added</TableHead>
           <TableHead></TableHead>
         </TableRow>
@@ -201,10 +194,9 @@ function CandidatesContent() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", mrfId: mrfFilter });
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [newCandidatePassword, setNewCandidatePassword] = useState("");
-  const [users, setUsers] = useState<{ id: string; name: string; email: string }[]>([]);
-  const [showEmailSuggestions, setShowEmailSuggestions] = useState(false);
 
   const fetchCandidates = () => {
     const url = mrfFilter ? `/api/candidates?mrfId=${mrfFilter}` : "/api/candidates";
@@ -214,7 +206,6 @@ function CandidatesContent() {
   useEffect(() => {
     fetchCandidates();
     fetch("/api/mrfs").then((r) => r.json()).then(setMrfs);
-    fetch("/api/users").then((r) => r.json()).then((d) => setUsers(Array.isArray(d) ? d : []));
   }, []);
 
   // Separate active/rejected/on-hold
@@ -241,21 +232,34 @@ function CandidatesContent() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
-    setSubmitting(false);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.tempPassword) setNewCandidatePassword(data.tempPassword);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setSubmitting(false);
+      toast({ variant: "destructive", title: "Could not add candidate", description: data.error || "Please check the details and try again." });
+      return;
     }
+    const data = await res.json();
+    if (data.tempPassword) setNewCandidatePassword(data.tempPassword);
+    // Resume upload needs the candidate's id (it's part of the S3 key), so
+    // it can only happen after creation succeeds — best-effort, doesn't
+    // block the candidate from being added if it fails.
+    if (resumeFile) {
+      const fd = new FormData();
+      fd.append("file", resumeFile);
+      const uploadRes = await fetch(`/api/candidates/${data.id}/resume`, { method: "POST", body: fd });
+      if (!uploadRes.ok) {
+        const uploadData = await uploadRes.json().catch(() => ({}));
+        toast({ variant: "destructive", title: "Resume upload failed", description: uploadData.error || "The candidate was added, but the resume could not be uploaded." });
+      }
+    }
+    setSubmitting(false);
     setShowAdd(false);
     setForm({ firstName: "", lastName: "", email: "", phone: "", mrfId: "" });
+    setResumeFile(null);
     fetchCandidates();
   };
 
   const stageCount = (key: string) => activeCandidates.filter((c) => c.currentStage === key).length;
-
-  const emailSuggestions = form.email.trim().length > 0
-    ? users.filter((u) => u.email.toLowerCase().includes(form.email.toLowerCase())).slice(0, 6)
-    : [];
 
   const INTERVIEW_STAGES = new Set(["INTERVIEW_1", "INTERVIEW_2", "INTERVIEW_3"]);
   const interviewedFiltered = filtered.filter((c) => INTERVIEW_STAGES.has(c.currentStage));
@@ -437,39 +441,12 @@ function CandidatesContent() {
             </div>
             <div className="space-y-2">
               <Label>Email *</Label>
-              <div className="relative">
-                <Input
-                  type="email"
-                  value={form.email}
-                  autoComplete="off"
-                  onChange={(e) => { setForm({ ...form, email: e.target.value }); setShowEmailSuggestions(true); }}
-                  onFocus={() => setShowEmailSuggestions(true)}
-                  onBlur={() => setTimeout(() => setShowEmailSuggestions(false), 150)}
-                />
-                {showEmailSuggestions && emailSuggestions.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
-                    {emailSuggestions.map((u) => {
-                      const parts = u.name.trim().split(" ");
-                      const firstName = parts[0] || "";
-                      const lastName = parts.slice(1).join(" ");
-                      return (
-                        <button
-                          key={u.id}
-                          type="button"
-                          className="w-full px-3 py-2 text-left hover:bg-blue-50 transition-colors"
-                          onMouseDown={() => {
-                            setForm({ ...form, email: u.email, firstName: firstName || form.firstName, lastName: lastName || form.lastName });
-                            setShowEmailSuggestions(false);
-                          }}
-                        >
-                          <p className="text-sm font-medium text-gray-900">{u.name}</p>
-                          <p className="text-xs text-gray-500">{u.email}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              <Input
+                type="email"
+                value={form.email}
+                autoComplete="off"
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
             </div>
             <div className="space-y-2">
               <Label>Phone</Label>
@@ -485,6 +462,16 @@ function CandidatesContent() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Resume</Label>
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
+                className="text-sm text-gray-600 file:mr-3 file:rounded-md file:border file:border-gray-200 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-gray-50"
+              />
+              <p className="text-xs text-gray-500">PDF, DOC, DOCX, PNG, or JPG. Uploaded to AWS once the candidate is added.</p>
             </div>
           </div>
           <DialogFooter>

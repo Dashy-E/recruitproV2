@@ -13,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import { ArrowLeft, ChevronRight, Loader2, Upload, FileText, CheckCircle, XCircle, Clock, Pencil, Trash2 } from "lucide-react";
 import { CANDIDATE_STAGES, formatDate } from "@/lib/utils";
 import { useSession } from "next-auth/react";
+import { toast } from "@/hooks/use-toast";
+import { OfferLetterPdfPreview } from "@/components/offer-letter-pdf-preview";
 
 interface Document {
   id: string; name: string; documentType: string; fileUrl: string;
@@ -23,6 +25,8 @@ interface Document {
 interface CandidateDetail {
   id: string; firstName: string; lastName: string; email: string; phone: string | null;
   currentStage: string; aiScore: number | null; aiScoreNotes: string | null; resumeUrl: string | null;
+  designation: string | null; grade: string | null; location: string | null;
+  dateOfJoining: string | null; address: string | null;
   createdAt: string; updatedAt: string;
   mrf: { id: string; title: string; department: { name: string }; orgUnit: { name: string; path: string } | null; designation: { requiresPsychometric: boolean } | null } | null;
   stageHistory: { id: string; fromStage: string | null; toStage: string; notes: string | null; changedAt: string }[];
@@ -33,8 +37,8 @@ interface MRFOption { id: string; referenceNumber: string; mrfNumber: string | n
 
 interface EditForm {
   firstName: string; lastName: string; email: string; phone: string;
-  aiScore: string; aiScoreNotes: string; resumeUrl: string; mrfId: string;
-  password: string;
+  mrfId: string;
+  designation: string; grade: string; location: string; dateOfJoining: string; address: string;
 }
 
 const APPROVAL_BADGE: Record<string, { label: string; icon: React.ElementType; cls: string }> = {
@@ -58,10 +62,17 @@ export default function CandidateDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [docType, setDocType] = useState("RECRUITMENT");
   const fileRef = useRef<HTMLInputElement>(null);
+  const aadharRef = useRef<HTMLInputElement>(null);
+  const passportRef = useRef<HTMLInputElement>(null);
   const [mrfs, setMrfs] = useState<MRFOption[]>([]);
   const [editDialog, setEditDialog] = useState(false);
-  const [editForm, setEditForm] = useState<EditForm>({ firstName: "", lastName: "", email: "", phone: "", aiScore: "", aiScoreNotes: "", resumeUrl: "", mrfId: "", password: "" });
+  const [editForm, setEditForm] = useState<EditForm>({ firstName: "", lastName: "", email: "", phone: "", mrfId: "", designation: "", grade: "", location: "", dateOfJoining: "", address: "" });
   const [editSubmitting, setEditSubmitting] = useState(false);
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [deletingResume, setDeletingResume] = useState(false);
+  const [addressSourceType, setAddressSourceType] = useState("AADHAAR");
+  const [fetchingAddress, setFetchingAddress] = useState(false);
+  const [offerLetterPreviewOpen, setOfferLetterPreviewOpen] = useState(false);
 
   const canManage = ["ADMIN", "HR"].includes(role);
 
@@ -91,41 +102,93 @@ export default function CandidateDetailPage() {
       lastName: candidate.lastName,
       email: candidate.email,
       phone: candidate.phone ?? "",
-      aiScore: candidate.aiScore != null ? String(candidate.aiScore) : "",
-      aiScoreNotes: candidate.aiScoreNotes ?? "",
-      resumeUrl: candidate.resumeUrl ?? "",
       mrfId: candidate.mrf?.id ?? "none",
-      password: "",
+      designation: candidate.designation ?? "",
+      grade: candidate.grade ?? "",
+      location: candidate.location ?? "",
+      dateOfJoining: candidate.dateOfJoining ? candidate.dateOfJoining.slice(0, 10) : "",
+      address: candidate.address ?? "",
     });
+    setResumeFile(null);
     setEditDialog(true);
   };
 
-  const handleEdit = async () => {
-    setEditSubmitting(true);
+  const handleDeleteResume = async () => {
+    setDeletingResume(true);
+    const res = await fetch(`/api/candidates/${id}/resume`, { method: "DELETE" });
+    setDeletingResume(false);
+    if (res.ok) {
+      fetchCandidate();
+      toast({ variant: "success", title: "Resume deleted" });
+    } else {
+      const data = await res.json().catch(() => ({}));
+      toast({ variant: "destructive", title: "Failed to delete resume", description: data.error });
+    }
+  };
+
+  const handleFetchAddress = async () => {
+    setFetchingAddress(true);
+    const res = await fetch(`/api/candidates/${id}/document-address?type=${addressSourceType}`);
+    const data = await res.json().catch(() => ({}));
+    setFetchingAddress(false);
+    if (res.ok) {
+      setEditForm((prev) => ({ ...prev, address: data.address }));
+      toast({ variant: "success", title: "Address fetched" });
+    } else {
+      toast({ variant: "destructive", title: "Could not fetch address", description: data.error });
+    }
+  };
+
+  // Shared by both the plain Save button and "Generate offer letter" — the
+  // latter saves first, then opens the PDF preview on top of the same data.
+  const saveCandidateEdits = async () => {
     const payload: Record<string, unknown> = {
       firstName: editForm.firstName,
       lastName: editForm.lastName,
       email: editForm.email,
       phone: editForm.phone || null,
-      aiScoreNotes: editForm.aiScoreNotes || null,
-      resumeUrl: editForm.resumeUrl || null,
       mrfId: editForm.mrfId === "none" ? null : editForm.mrfId,
+      designation: editForm.designation || null,
+      grade: editForm.grade || null,
+      location: editForm.location || null,
+      dateOfJoining: editForm.dateOfJoining || null,
+      address: editForm.address || null,
     };
-    if (editForm.aiScore !== "") {
-      const parsed = parseFloat(editForm.aiScore);
-      payload.aiScore = isNaN(parsed) ? null : parsed;
-    } else {
-      payload.aiScore = null;
+    // Resume upload/delete are handled by their own endpoints, independent
+    // of this general profile PATCH — upload here only if a new file was
+    // picked (the resume section shows View+Delete once one exists, so
+    // resumeFile is only ever set when the candidate has none on file yet).
+    if (resumeFile) {
+      const fd = new FormData();
+      fd.append("file", resumeFile);
+      const uploadRes = await fetch(`/api/candidates/${id}/resume`, { method: "POST", body: fd });
+      if (!uploadRes.ok) {
+        const uploadData = await uploadRes.json().catch(() => ({}));
+        toast({ variant: "destructive", title: "Resume upload failed", description: uploadData.error });
+      }
     }
-    if (editForm.password) payload.newPassword = editForm.password;
     await fetch(`/api/candidates/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    setResumeFile(null);
+    fetchCandidate();
+  };
+
+  const handleEdit = async () => {
+    setEditSubmitting(true);
+    await saveCandidateEdits();
     setEditSubmitting(false);
     setEditDialog(false);
-    fetchCandidate();
+  };
+
+  const handleGenerateOfferLetter = async () => {
+    setEditSubmitting(true);
+    await saveCandidateEdits();
+    setEditSubmitting(false);
+    setEditDialog(false);
+    setOfferLetterPreviewOpen(true);
   };
 
   const handleStageChange = async () => {
@@ -146,17 +209,20 @@ export default function CandidateDetailPage() {
     }
   };
 
-  const handleUpload = async () => {
-    const file = fileRef.current?.files?.[0];
-    if (!file) return;
+  // Aadhar/Passport can each have several pages/sides — multi-file, uploaded
+  // to their own S3 subfolder (see /api/documents POST) for easy batch
+  // processing later.
+  const handleTypedUpload = async (type: string, input: HTMLInputElement | null) => {
+    const files = input?.files;
+    if (!files || !files.length) return;
     setUploading(true);
     const fd = new FormData();
-    fd.append("file", file);
-    fd.append("documentType", docType);
+    Array.from(files).forEach((f) => fd.append("file", f));
+    fd.append("documentType", type);
     fd.append("candidateId", id);
     await fetch("/api/documents", { method: "POST", body: fd });
     setUploading(false);
-    if (fileRef.current) fileRef.current.value = "";
+    if (input) input.value = "";
     fetchDocs();
   };
 
@@ -188,6 +254,48 @@ export default function CandidateDetailPage() {
     return true;
   });
 
+  // Aadhar/Passport get their own sections below, so they're excluded from
+  // the generic Documents list to avoid showing every file twice.
+  const aadharDocs = documents.filter((d) => d.documentType === "AADHAAR");
+  const passportDocs = documents.filter((d) => d.documentType === "PASSPORT");
+  const otherDocs = documents.filter((d) => d.documentType !== "AADHAAR" && d.documentType !== "PASSPORT");
+
+  const renderDocRow = (doc: Document) => {
+    const info = APPROVAL_BADGE[doc.approvalStatus] || APPROVAL_BADGE.PENDING;
+    const Icon = info.icon;
+    return (
+      <div key={doc.id} className="flex items-center gap-3 rounded-lg border p-3">
+        <FileText className="h-5 w-5 text-gray-400 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+            className="text-sm font-medium text-blue-600 hover:underline truncate block">
+            {doc.name}
+          </a>
+          <p className="text-xs text-gray-400">{doc.documentType} · by {doc.uploadedBy.name} · {formatDate(doc.createdAt)}</p>
+          {doc.approvalNotes && <p className="text-xs text-gray-500 italic mt-0.5">"{doc.approvalNotes}"</p>}
+        </div>
+        <div className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${info.cls}`}>
+          <Icon className="h-3 w-3" />
+          {info.label}
+        </div>
+        {canManage && doc.approvalStatus === "PENDING" && (
+          <div className="flex gap-1">
+            <Button size="sm" variant="ghost" className="h-7 text-green-600 hover:text-green-700 text-xs px-2"
+              onClick={() => handleApproval(doc.id, "APPROVED")}>Approve</Button>
+            <Button size="sm" variant="ghost" className="h-7 text-red-600 hover:text-red-700 text-xs px-2"
+              onClick={() => handleApproval(doc.id, "REJECTED")}>Reject</Button>
+          </div>
+        )}
+        {canManage && (
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-gray-400 hover:text-red-600"
+            onClick={() => handleDeleteDoc(doc.id, doc.name)}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
@@ -200,7 +308,7 @@ export default function CandidateDetailPage() {
         </div>
         {canManage && (
           <Button variant="outline" onClick={openEdit}>
-            <Pencil className="h-4 w-4" /> Edit
+            <Pencil className="h-4 w-4" /> Edit/Generate offer letter
           </Button>
         )}
         {canManage && (
@@ -324,6 +432,56 @@ export default function CandidateDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Aadhar */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Aadhar</CardTitle>
+            {canManage && (
+              <>
+                <input ref={aadharRef} type="file" multiple accept="image/*,.pdf" className="hidden" onChange={() => handleTypedUpload("AADHAAR", aadharRef.current)} />
+                <Button size="sm" variant="outline" onClick={() => aadharRef.current?.click()} disabled={uploading}>
+                  {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                  Upload
+                </Button>
+              </>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {aadharDocs.length === 0 ? (
+            <p className="text-sm text-gray-500">No Aadhar documents uploaded yet.</p>
+          ) : (
+            <div className="space-y-2">{aadharDocs.map(renderDocRow)}</div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Passport */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Passport</CardTitle>
+            {canManage && (
+              <>
+                <input ref={passportRef} type="file" multiple accept="image/*,.pdf" className="hidden" onChange={() => handleTypedUpload("PASSPORT", passportRef.current)} />
+                <Button size="sm" variant="outline" onClick={() => passportRef.current?.click()} disabled={uploading}>
+                  {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                  Upload
+                </Button>
+              </>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {passportDocs.length === 0 ? (
+            <p className="text-sm text-gray-500">No passport documents uploaded yet.</p>
+          ) : (
+            <div className="space-y-2">{passportDocs.map(renderDocRow)}</div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Documents */}
       <Card>
         <CardHeader>
@@ -339,7 +497,7 @@ export default function CandidateDetailPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <input ref={fileRef} type="file" className="hidden" onChange={handleUpload} />
+                <input ref={fileRef} type="file" multiple className="hidden" onChange={() => handleTypedUpload(docType, fileRef.current)} />
                 <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading}>
                   {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
                   Upload
@@ -349,53 +507,17 @@ export default function CandidateDetailPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {documents.length === 0 ? (
+          {otherDocs.length === 0 ? (
             <p className="text-sm text-gray-500">No documents uploaded yet.</p>
           ) : (
-            <div className="space-y-2">
-              {documents.map((doc) => {
-                const info = APPROVAL_BADGE[doc.approvalStatus] || APPROVAL_BADGE.PENDING;
-                const Icon = info.icon;
-                return (
-                  <div key={doc.id} className="flex items-center gap-3 rounded-lg border p-3">
-                    <FileText className="h-5 w-5 text-gray-400 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
-                        className="text-sm font-medium text-blue-600 hover:underline truncate block">
-                        {doc.name}
-                      </a>
-                      <p className="text-xs text-gray-400">{doc.documentType} · by {doc.uploadedBy.name} · {formatDate(doc.createdAt)}</p>
-                      {doc.approvalNotes && <p className="text-xs text-gray-500 italic mt-0.5">"{doc.approvalNotes}"</p>}
-                    </div>
-                    <div className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${info.cls}`}>
-                      <Icon className="h-3 w-3" />
-                      {info.label}
-                    </div>
-                    {canManage && doc.approvalStatus === "PENDING" && (
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" className="h-7 text-green-600 hover:text-green-700 text-xs px-2"
-                          onClick={() => handleApproval(doc.id, "APPROVED")}>Approve</Button>
-                        <Button size="sm" variant="ghost" className="h-7 text-red-600 hover:text-red-700 text-xs px-2"
-                          onClick={() => handleApproval(doc.id, "REJECTED")}>Reject</Button>
-                      </div>
-                    )}
-                    {canManage && (
-                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-gray-400 hover:text-red-600"
-                        onClick={() => handleDeleteDoc(doc.id, doc.name)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <div className="space-y-2">{otherDocs.map(renderDocRow)}</div>
           )}
         </CardContent>
       </Card>
 
       {/* Edit Candidate Dialog */}
       <Dialog open={editDialog} onOpenChange={setEditDialog}>
-        <DialogContent className="max-w-lg flex flex-col max-h-[90vh]">
+        <DialogContent className="max-w-2xl flex flex-col max-h-[90vh]">
           <DialogHeader className="shrink-0">
             <DialogTitle>Edit Candidate Details</DialogTitle>
           </DialogHeader>
@@ -419,10 +541,6 @@ export default function CandidateDetailPage() {
               <Input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} placeholder="Optional" />
             </div>
             <div className="space-y-1">
-              <Label>Password <span className="text-gray-400 font-normal text-xs">(leave blank to keep current)</span></Label>
-              <Input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Set new portal password" />
-            </div>
-            <div className="space-y-1">
               <Label>Linked MRF</Label>
               <Select value={editForm.mrfId} onValueChange={(v) => setEditForm({ ...editForm, mrfId: v })}>
                 <SelectTrigger><SelectValue placeholder="Select MRF" /></SelectTrigger>
@@ -434,28 +552,108 @@ export default function CandidateDetailPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
-              <Label>AI Score (%)</Label>
-              <Input type="number" min="0" max="100" step="0.1" value={editForm.aiScore}
-                onChange={(e) => setEditForm({ ...editForm, aiScore: e.target.value })} placeholder="e.g. 82.5" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Designation</Label>
+                <Input value={editForm.designation} onChange={(e) => setEditForm({ ...editForm, designation: e.target.value })} placeholder="e.g. Software Engineer" />
+              </div>
+              <div className="space-y-1">
+                <Label>Grade</Label>
+                <Input value={editForm.grade} onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })} placeholder="e.g. M3" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Location</Label>
+                <Input value={editForm.location} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} placeholder="e.g. Gandhidham" />
+              </div>
+              <div className="space-y-1">
+                <Label>Date of Joining</Label>
+                <Input type="date" value={editForm.dateOfJoining} onChange={(e) => setEditForm({ ...editForm, dateOfJoining: e.target.value })} />
+              </div>
             </div>
             <div className="space-y-1">
-              <Label>AI Score Notes</Label>
-              <Textarea rows={2} value={editForm.aiScoreNotes}
-                onChange={(e) => setEditForm({ ...editForm, aiScoreNotes: e.target.value })} placeholder="Optional notes from AI screening" />
+              <div className="flex items-center justify-between">
+                <Label>Address</Label>
+                <div className="flex items-center gap-2">
+                  <Select value={addressSourceType} onValueChange={setAddressSourceType}>
+                    <SelectTrigger className="h-7 w-28 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="AADHAAR">Aadhar</SelectItem>
+                      <SelectItem value="PASSPORT">Passport</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={handleFetchAddress} disabled={fetchingAddress}>
+                    {fetchingAddress ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                    Fetch Address
+                  </Button>
+                </div>
+              </div>
+              <Textarea rows={2} value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} placeholder="Full address" />
             </div>
             <div className="space-y-1">
-              <Label>Resume URL</Label>
-              <Input value={editForm.resumeUrl} onChange={(e) => setEditForm({ ...editForm, resumeUrl: e.target.value })} placeholder="https://..." />
+              <Label>Resume</Label>
+              {candidate.resumeUrl ? (
+                <div className="flex items-center gap-3">
+                  <a href={candidate.resumeUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline">
+                    View uploaded resume
+                  </a>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDeleteResume}
+                    disabled={deletingResume}
+                    className="text-red-600 border-red-200 hover:bg-red-50"
+                  >
+                    {deletingResume ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    Delete
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                    onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
+                    className="text-sm text-gray-600 file:mr-3 file:rounded-md file:border file:border-gray-200 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-gray-50"
+                  />
+                  <p className="text-xs text-gray-500">PDF, DOC, DOCX, PNG, or JPG. Uploaded when you save.</p>
+                </>
+              )}
             </div>
           </div>
           <DialogFooter className="shrink-0 pt-2 border-t">
             <Button variant="outline" onClick={() => setEditDialog(false)}>Cancel</Button>
+            <Button variant="outline" onClick={handleGenerateOfferLetter} disabled={!editForm.firstName || !editForm.email || editSubmitting}>
+              {editSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Generate offer letter
+            </Button>
             <Button onClick={handleEdit} disabled={!editForm.firstName || !editForm.email || editSubmitting}>
               {editSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
               Save Changes
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Offer Letter PDF Preview */}
+      <Dialog open={offerLetterPreviewOpen} onOpenChange={setOfferLetterPreviewOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Offer Letter</DialogTitle>
+          </DialogHeader>
+          <OfferLetterPdfPreview
+            candidate={{
+              firstName: candidate.firstName,
+              lastName: candidate.lastName,
+              designation: candidate.designation,
+              grade: candidate.grade,
+              location: candidate.location,
+              dateOfJoining: candidate.dateOfJoining,
+              address: candidate.address,
+            }}
+          />
         </DialogContent>
       </Dialog>
 

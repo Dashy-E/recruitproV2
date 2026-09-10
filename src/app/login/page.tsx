@@ -45,7 +45,7 @@ export default function LoginPage() {
     const result = await signIn("credentials", { userName, password, redirect: false });
     setLoginLoading(false);
     if (result?.error) {
-      setLoginError("Invalid username or password, or your account is not yet active.");
+      setLoginError(result.error);
       return;
     }
     router.push("/dashboard");

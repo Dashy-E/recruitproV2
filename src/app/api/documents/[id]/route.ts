@@ -4,8 +4,24 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { hasPermission } from "@/lib/permissions";
+import { deleteFromS3 } from "@/lib/s3";
 import { unlink } from "fs/promises";
 import { join } from "path";
+
+// New uploads (see /api/documents POST) store a bare S3 key; documents
+// uploaded before the S3 migration still hold a "/uploads/..." local path —
+// route the delete to whichever store actually has the file.
+async function deleteStoredFile(fileUrl: string | null | undefined) {
+  if (!fileUrl) return;
+  if (fileUrl.startsWith("/")) {
+    try {
+      const filename = fileUrl.split("/uploads/")[1];
+      if (filename) await unlink(join(process.cwd(), "public", "uploads", filename));
+    } catch { /* file may already be missing */ }
+  } else {
+    await deleteFromS3(fileUrl).catch(() => {});
+  }
+}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -30,11 +46,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (approvalStatus === "REJECTED") {
-    // Delete physical file
-    try {
-      const filename = doc.fileUrl?.split("/uploads/")[1];
-      if (filename) await unlink(join(process.cwd(), "public", "uploads", filename));
-    } catch { /* file may already be missing */ }
+    await deleteStoredFile(doc.fileUrl);
 
     // Delete DB record
     await db("RECRUIT_T_Document").where({ id }).del();
@@ -80,10 +92,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const doc = await db("RECRUIT_T_Document").where({ id }).first();
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  try {
-    const filename = doc.fileUrl?.split("/uploads/")[1];
-    if (filename) await unlink(join(process.cwd(), "public", "uploads", filename));
-  } catch { /* file may already be missing */ }
+  await deleteStoredFile(doc.fileUrl);
 
   await db("RECRUIT_T_Document").where({ id }).del();
   return NextResponse.json({ success: true });

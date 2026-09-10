@@ -57,18 +57,22 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!hasPermission(session, "MANAGE_EMPLOYEES")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const { candidateId, joiningDate, department, designation, ctc, reportingTo, orgUnitId } = await req.json();
+  const { candidateId, employeeCode, joiningDate, department, designation, ctc, reportingTo, orgUnitId } = await req.json();
 
-  // Generate employee code
-  const count = await db("RECRUIT_T_Employee").count<{ count: string }[]>("* as count").then((r) => Number(r[0].count));
-  const employeeCode = `EMP-${String(count + 1).padStart(4, "0")}`;
+  if (!employeeCode?.trim()) {
+    return NextResponse.json({ error: "Employee code is required" }, { status: 400 });
+  }
+  const existing = await db("RECRUIT_T_Employee").where({ employeeCode: employeeCode.trim() }).first();
+  if (existing) {
+    return NextResponse.json({ error: "This employee code is already in use" }, { status: 409 });
+  }
   const now = new Date();
 
   const [employee] = await db("RECRUIT_T_Employee")
     .insert({
       id: newId(),
       candidateId,
-      employeeCode,
+      employeeCode: employeeCode.trim(),
       joiningDate: new Date(joiningDate),
       department,
       designation,

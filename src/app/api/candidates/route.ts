@@ -81,36 +81,32 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { firstName, lastName, email, phone, mrfId } = body;
 
-  // Create user account for candidate
+  // Email is already unique-constrained on RECRUIT_T_User (see the
+  // candidate-creation username change) — reject upfront rather than
+  // silently reusing/linking an existing account to a new candidate.
   const existingUser = await db("RECRUIT_T_User").where({ email }).first();
-  let userId = existingUser?.id;
-
-  let tempPassword: string | undefined;
-  if (!existingUser) {
-    tempPassword = Math.random().toString(36).slice(-8);
-    userId = newId();
-    const now = new Date();
-
-    // Auto-derive a unique username from the email local-part since this
-    // HR/Admin-driven flow doesn't collect one directly.
-    const base = email.split("@")[0];
-    let userName = base;
-    let suffix = 1;
-    while (await db("RECRUIT_T_User").where({ userName }).first()) {
-      userName = `${base}${++suffix}`;
-    }
-
-    await db("RECRUIT_T_User").insert({
-      id: userId,
-      name: `${firstName} ${lastName}`,
-      userName,
-      email,
-      password: await bcrypt.hash(tempPassword, 10),
-      role: "CANDIDATE",
-      createdAt: now,
-      updatedAt: now,
-    });
+  if (existingUser) {
+    return NextResponse.json({ error: "This email is already registered to another user." }, { status: 409 });
   }
+
+  const tempPassword = Math.random().toString(36).slice(-8);
+  const userId = newId();
+  const userCreatedAt = new Date();
+
+  await db("RECRUIT_T_User").insert({
+    id: userId,
+    name: `${firstName} ${lastName}`,
+    // This HR/Admin-driven flow doesn't collect a username directly, and
+    // email is already guaranteed unique (checked via existingUser above,
+    // enforced by User_email_key) — using it as the username directly
+    // means it can never collide with User_userName_key either.
+    userName: email,
+    email,
+    password: await bcrypt.hash(tempPassword, 10),
+    role: "CANDIDATE",
+    createdAt: userCreatedAt,
+    updatedAt: userCreatedAt,
+  });
 
   const candidateId = newId();
   const now = new Date();
@@ -118,7 +114,7 @@ export async function POST(req: NextRequest) {
   await db.transaction(async (trx) => {
     await trx("RECRUIT_T_Candidate").insert({
       id: candidateId,
-      userId: userId!,
+      userId,
       mrfId: mrfId || null,
       firstName,
       lastName,

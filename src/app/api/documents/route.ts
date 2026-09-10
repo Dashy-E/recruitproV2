@@ -3,10 +3,17 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
-import { writeFile, mkdir } from "fs/promises";
-import { join } from "path";
 import { extractDocumentData } from "@/lib/extract-document";
 import { hasPermission } from "@/lib/permissions";
+import { uploadToS3, getSignedFileUrl } from "@/lib/s3";
+
+// Friendly, easily-greppable S3 subfolder per document type — keeps Aadhaar
+// and Passport uploads clearly separated for the planned OCR/address-extraction
+// follow-up, rather than mixed in with everything else under "Other".
+const TYPE_FOLDER: Record<string, string> = {
+  AADHAAR: "Aadhar",
+  PASSPORT: "Passport",
+};
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -52,8 +59,9 @@ export async function GET(req: NextRequest) {
     ? await db("RECRUIT_T_Employee").whereIn("candidateId", candidateIds).select("id", "candidateId")
     : [];
 
-  const result = docs.map((d: any) => ({
+  const result = await Promise.all(docs.map(async (d: any) => ({
     ...d,
+    fileUrl: await getSignedFileUrl(d.fileUrl),
     uploadedBy: (() => {
       const u = uploaders.find((x: any) => x.id === d.uploadedById);
       return u ? { name: u.name } : null;
@@ -73,7 +81,7 @@ export async function GET(req: NextRequest) {
       const m = mrfs.find((x: any) => x.id === d.mrfId);
       return m ? { referenceNumber: m.referenceNumber, mrfNumber: m.mrfNumber, title: m.title } : null;
     })(),
-  }));
+  })));
 
   return NextResponse.json(result);
 }
@@ -86,12 +94,12 @@ export async function POST(req: NextRequest) {
   const userId = (session.user as { id?: string })?.id!;
 
   const formData = await req.formData();
-  const file = formData.get("file") as File | null;
+  const files = formData.getAll("file") as File[];
   const documentType = (formData.get("documentType") as string) || "OTHER";
   const candidateId = formData.get("candidateId") as string | null;
   const mrfId = formData.get("mrfId") as string | null;
 
-  if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
+  if (!files.length) return NextResponse.json({ error: "No file provided" }, { status: 400 });
 
   if (role === "EMPLOYEE") {
     // Employees can only upload for their own candidate profile (onboarding docs)
@@ -115,17 +123,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const bytes = await file.arrayBuffer();
-  const buffer = Buffer.from(bytes);
-
-  const uploadDir = join(process.cwd(), "public", "uploads");
-  await mkdir(uploadDir, { recursive: true });
-
-  const safeFileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-  const filePath = join(uploadDir, safeFileName);
-  await writeFile(filePath, buffer);
-  const fileUrl = `/uploads/${safeFileName}`;
-
   // Candidate uploads start as PENDING (need approval); HR/Admin uploads auto-approved
   const approvalStatus = hasPermission(session, "MANAGE_DOCUMENTS") ? "APPROVED" : "PENDING";
 
@@ -136,30 +133,53 @@ export async function POST(req: NextRequest) {
     resolvedCandidateId = candidate?.id ?? null;
   }
 
-  // Attempt to extract text data from PDFs for known document types
-  const extractableTypes = ["AADHAAR", "PAN", "PASSPORT", "BANK_DETAILS"];
-  let extractedData: string | null = null;
-  if (extractableTypes.includes(documentType)) {
-    const fields = await extractDocumentData(filePath, file.type || "", documentType);
-    if (fields) extractedData = JSON.stringify(fields);
+  // Same per-candidate folder resumes already use, so every document for a
+  // candidate lives together in one place, with a subfolder per document
+  // type — keeps Aadhaar/Passport clearly identifiable for the planned
+  // address-extraction follow-up instead of mixed in with everything else.
+  const typeFolder = TYPE_FOLDER[documentType] || "Other";
+  let folderPrefix = "Recruitment/Document";
+  if (resolvedCandidateId) {
+    const candidate = await db("RECRUIT_T_Candidate").where({ id: resolvedCandidateId }).select("firstName").first();
+    const candidateFolder = `${(candidate?.firstName || "Candidate").replace(/[^a-zA-Z0-9]/g, "") || "Candidate"}_${resolvedCandidateId}`;
+    folderPrefix = `Recruitment/Candidate/${candidateFolder}/${typeFolder}`;
   }
 
-  const [doc] = await db("RECRUIT_T_Document")
-    .insert({
-      id: newId(),
-      name: file.name,
-      fileUrl,
-      fileType: file.type || "application/octet-stream",
-      fileSize: file.size,
-      documentType,
-      uploadedById: userId,
-      candidateId: resolvedCandidateId || null,
-      mrfId: mrfId || null,
-      approvalStatus,
-      extractedData,
-      createdAt: new Date(),
-    })
-    .returning("*");
+  // Attempt to extract text data from PDFs for known document types
+  const extractableTypes = ["AADHAAR", "PAN", "PASSPORT", "BANK_DETAILS"];
 
-  return NextResponse.json(doc, { status: 201 });
+  const created = [];
+  for (const file of files) {
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+    const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const key = `${folderPrefix}/${Date.now()}-${safeFileName}`;
+    await uploadToS3(key, buffer, file.type || "application/octet-stream");
+
+    let extractedData: string | null = null;
+    if (extractableTypes.includes(documentType)) {
+      const fields = await extractDocumentData(buffer, file.type || "", documentType);
+      if (fields) extractedData = JSON.stringify(fields);
+    }
+
+    const [doc] = await db("RECRUIT_T_Document")
+      .insert({
+        id: newId(),
+        name: file.name,
+        fileUrl: key,
+        fileType: file.type || "application/octet-stream",
+        fileSize: file.size,
+        documentType,
+        uploadedById: userId,
+        candidateId: resolvedCandidateId || null,
+        mrfId: mrfId || null,
+        approvalStatus,
+        extractedData,
+        createdAt: new Date(),
+      })
+      .returning("*");
+    created.push({ ...doc, fileUrl: await getSignedFileUrl(doc.fileUrl) });
+  }
+
+  return NextResponse.json(files.length === 1 ? created[0] : created, { status: 201 });
 }

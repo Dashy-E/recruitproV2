@@ -230,6 +230,11 @@ CREATE TABLE "RECRUIT_T_Candidate" (
     "candidateStatus" VARCHAR2(50)  DEFAULT 'ACTIVE' NOT NULL,
     "statusNote"      CLOB,
     "interviewDate"   TIMESTAMP,
+    "designation"     VARCHAR2(255),
+    "grade"           VARCHAR2(50),
+    "location"        VARCHAR2(255),
+    "dateOfJoining"   TIMESTAMP,
+    "address"         VARCHAR2(1000),
     CONSTRAINT "Candidate_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "Candidate_isActive_chk" CHECK ("isActive" IN (0,1))
 );

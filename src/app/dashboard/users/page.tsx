@@ -3,13 +3,14 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Loader2, UserCheck, Pencil } from "lucide-react";
+import { Plus, Loader2, UserCheck, Pencil } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { OrgUnitPicker, OrgTreeNode, buildOrgTree } from "@/components/org-unit-picker";
 
@@ -53,7 +54,9 @@ export default function UsersPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [orgTree, setOrgTree] = useState<OrgTreeNode[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [search, setSearch] = useState("");
+  const [columnFilters, setColumnFilters] = useState({
+    name: "", userName: "", email: "", role: "ALL", orgUnits: "", status: "ALL", joined: "",
+  });
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -86,12 +89,20 @@ export default function UsersPage() {
     fetch("/api/roles").then((r) => r.json()).then((d) => setRoles(Array.isArray(d) ? d : []));
   }, []);
 
-  const filtered = users.filter(
-    (u) =>
-      u.name.toLowerCase().includes(search.toLowerCase()) ||
-      u.email.toLowerCase().includes(search.toLowerCase()) ||
-      u.userName?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = users.filter((u) => {
+    const f = columnFilters;
+    if (f.name && !u.name.toLowerCase().includes(f.name.toLowerCase())) return false;
+    if (f.userName && !(u.userName || "").toLowerCase().includes(f.userName.toLowerCase())) return false;
+    if (f.email && !u.email.toLowerCase().includes(f.email.toLowerCase())) return false;
+    if (f.role !== "ALL" && u.role !== f.role) return false;
+    if (f.orgUnits) {
+      const orgText = u.orgUnits.map((o) => o.path || o.name).join(", ").toLowerCase();
+      if (!orgText.includes(f.orgUnits.toLowerCase())) return false;
+    }
+    if (f.status !== "ALL" && (f.status === "ACTIVE") !== u.isActive) return false;
+    if (f.joined && !formatDate(u.createdAt).toLowerCase().includes(f.joined.toLowerCase())) return false;
+    return true;
+  });
 
   // Roles HR can create (no ADMIN, no CANDIDATE — candidates are created via the candidate flow)
   const creatableRoles = roles
@@ -247,16 +258,18 @@ export default function UsersPage() {
 
       <Card>
         <CardHeader>
-          <div className="relative max-w-sm">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <Input
-              placeholder="Search by name or email..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-              autoComplete="off"
-              name="user-search"
-            />
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-500">
+              {filtered.length} of {users.length} users
+            </p>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-xs text-gray-500"
+              onClick={() => setColumnFilters({ name: "", userName: "", email: "", role: "ALL", orgUnits: "", status: "ALL", joined: "" })}
+            >
+              Clear filters
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -272,8 +285,72 @@ export default function UsersPage() {
                   <TableHead>Role</TableHead>
                   <TableHead>Org Units</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Joined</TableHead>
+                  <TableHead>Creation Date</TableHead>
                   <TableHead></TableHead>
+                </TableRow>
+                <TableRow>
+                  <TableHead className="py-1.5">
+                    <Input
+                      value={columnFilters.name}
+                      onChange={(e) => setColumnFilters({ ...columnFilters, name: e.target.value })}
+                      placeholder="Filter..."
+                      className="h-7 text-xs"
+                    />
+                  </TableHead>
+                  <TableHead className="py-1.5">
+                    <Input
+                      value={columnFilters.userName}
+                      onChange={(e) => setColumnFilters({ ...columnFilters, userName: e.target.value })}
+                      placeholder="Filter..."
+                      className="h-7 text-xs"
+                    />
+                  </TableHead>
+                  <TableHead className="py-1.5">
+                    <Input
+                      value={columnFilters.email}
+                      onChange={(e) => setColumnFilters({ ...columnFilters, email: e.target.value })}
+                      placeholder="Filter..."
+                      className="h-7 text-xs"
+                    />
+                  </TableHead>
+                  <TableHead className="py-1.5">
+                    <Select value={columnFilters.role} onValueChange={(v) => setColumnFilters({ ...columnFilters, role: v })}>
+                      <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All roles</SelectItem>
+                        {roles.filter((r) => r.isActive).map((r) => (
+                          <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableHead>
+                  <TableHead className="py-1.5">
+                    <Input
+                      value={columnFilters.orgUnits}
+                      onChange={(e) => setColumnFilters({ ...columnFilters, orgUnits: e.target.value })}
+                      placeholder="Filter..."
+                      className="h-7 text-xs"
+                    />
+                  </TableHead>
+                  <TableHead className="py-1.5">
+                    <Select value={columnFilters.status} onValueChange={(v) => setColumnFilters({ ...columnFilters, status: v })}>
+                      <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All</SelectItem>
+                        <SelectItem value="ACTIVE">Active</SelectItem>
+                        <SelectItem value="INACTIVE">Inactive</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableHead>
+                  <TableHead className="py-1.5">
+                    <Input
+                      value={columnFilters.joined}
+                      onChange={(e) => setColumnFilters({ ...columnFilters, joined: e.target.value })}
+                      placeholder="Filter..."
+                      className="h-7 text-xs"
+                    />
+                  </TableHead>
+                  <TableHead className="py-1.5"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -388,11 +465,11 @@ export default function UsersPage() {
                 <p className="text-sm font-medium text-gray-700">Change Password <span className="text-gray-400 font-normal">(leave blank to keep current)</span></p>
                 <div className="space-y-1">
                   <Label>New Password</Label>
-                  <Input type="password" autoComplete="new-password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Min. 6 characters" />
+                  <PasswordInput autoComplete="new-password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Min. 6 characters" />
                 </div>
                 <div className="space-y-1">
                   <Label>Confirm Password</Label>
-                  <Input type="password" autoComplete="new-password" value={editForm.confirmPassword} onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })} placeholder="Re-enter new password" />
+                  <PasswordInput autoComplete="new-password" value={editForm.confirmPassword} onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })} placeholder="Re-enter new password" />
                   {editForm.confirmPassword && !editPasswordsMatch && (
                     <p className="text-xs text-red-500">Passwords do not match.</p>
                   )}

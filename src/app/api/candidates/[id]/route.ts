@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { fromBool, toBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
+import { getSignedFileUrl } from "@/lib/s3";
 import bcrypt from "bcryptjs";
 
 const CANDIDATE_BOOLEAN_FIELDS = ["isActive"];
@@ -91,6 +92,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   return NextResponse.json({
     ...candidate,
     isActive: fromBool(candidate.isActive),
+    resumeUrl: await getSignedFileUrl(candidate.resumeUrl),
     user,
     mrf,
     stageHistory,
@@ -116,8 +118,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   for (const field of CANDIDATE_BOOLEAN_FIELDS) {
     if (data[field] !== undefined) data[field] = toBool(data[field] as boolean);
   }
+  if (data.dateOfJoining !== undefined) {
+    data.dateOfJoining = data.dateOfJoining ? new Date(data.dateOfJoining as string) : null;
+  }
 
-  const [candidate] = await db("RECRUIT_T_Candidate").where({ id }).update(data).returning("*");
+  // NOTE: .returning("*") on this UPDATE can hit an Oracle/oracledb
+  // bind-count mismatch (NJS-098) once the column count gets large enough
+  // (see the same fix on the MRF PATCH route) — plain update + re-select
+  // sidesteps it.
+  await db("RECRUIT_T_Candidate").where({ id }).update(data);
+  const candidate = await db("RECRUIT_T_Candidate").where({ id }).first();
 
   if (newPassword) {
     await db("RECRUIT_T_User")

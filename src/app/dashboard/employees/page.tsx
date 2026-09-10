@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Loader2, UserCheck, Eye, FileText, ClipboardList } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { OrgUnitPicker, OrgTreeNode } from "@/components/org-unit-picker";
+import { toast } from "@/hooks/use-toast";
 
 interface Employee {
   id: string;
@@ -98,6 +99,7 @@ export default function EmployeesPage() {
   const [orgTree, setOrgTree] = useState<OrgTreeNode[]>([]);
   const [form, setForm] = useState({
     candidateId: "",
+    employeeCode: "",
     joiningDate: "",
     department: "",
     designation: "",
@@ -131,13 +133,13 @@ export default function EmployeesPage() {
       (c) => c.currentStage === "JOINED" && !c.employee
     );
     setJoinedCandidates(joined);
-    setForm({ candidateId: "", joiningDate: "", department: "", designation: "", ctc: "", reportingTo: "", orgUnitId: "" });
+    setForm({ candidateId: "", employeeCode: "", joiningDate: "", department: "", designation: "", ctc: "", reportingTo: "", orgUnitId: "" });
     setShowAdd(true);
   };
 
   const handleAdd = async () => {
     setSubmitting(true);
-    await fetch("/api/employees", {
+    const res = await fetch("/api/employees", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -147,6 +149,11 @@ export default function EmployeesPage() {
       }),
     });
     setSubmitting(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast({ variant: "destructive", title: "Could not add employee", description: data.error || "Please check the details and try again." });
+      return;
+    }
     setShowAdd(false);
     fetchEmployees();
   };
@@ -284,6 +291,10 @@ export default function EmployeesPage() {
               </Select>
             </div>
             <div className="space-y-2">
+              <Label>Employee Code *</Label>
+              <Input value={form.employeeCode} onChange={(e) => setForm({ ...form, employeeCode: e.target.value })} placeholder="e.g. EMP-0001" />
+            </div>
+            <div className="space-y-2">
               <Label>Joining Date *</Label>
               <Input type="date" value={form.joiningDate} onChange={(e) => setForm({ ...form, joiningDate: e.target.value })} />
             </div>
@@ -314,7 +325,7 @@ export default function EmployeesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-            <Button onClick={handleAdd} disabled={!form.candidateId || !form.joiningDate || submitting}>
+            <Button onClick={handleAdd} disabled={!form.candidateId || !form.employeeCode.trim() || !form.joiningDate || submitting}>
               {submitting && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
               Create Employee Record
             </Button>

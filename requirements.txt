@@ -1,0 +1,5 @@
+# Python dependency for scripts/ocr_extract.py (Aadhar/Passport address OCR,
+# invoked from src/lib/extract-document.ts). Not installed by `npm install` —
+# whatever machine runs this app needs Python 3 plus:
+#   pip install -r requirements.txt
+easyocr==1.7.2
