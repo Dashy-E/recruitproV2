@@ -235,6 +235,9 @@ CREATE TABLE "RECRUIT_T_Candidate" (
     "location"        VARCHAR2(255),
     "dateOfJoining"   TIMESTAMP,
     "address"         VARCHAR2(1000),
+    "refNo"           VARCHAR2(255),
+    "recruitmentEntity" VARCHAR2(255),
+    "isFresher"       NUMBER(1)     DEFAULT 0 NOT NULL,
     CONSTRAINT "Candidate_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "Candidate_isActive_chk" CHECK ("isActive" IN (0,1))
 );

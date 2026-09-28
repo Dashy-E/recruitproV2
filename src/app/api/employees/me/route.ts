@@ -33,6 +33,7 @@ export async function GET() {
         lastName: candidate.lastName,
         email: candidate.email,
         currentStage: candidate.currentStage,
+        recruitmentEntity: candidate.recruitmentEntity,
         mrf,
       },
     };

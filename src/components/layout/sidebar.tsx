@@ -123,12 +123,6 @@ const navItems: NavItem[] = [
     ],
   },
   {
-    label: "Form Templates",
-    href: "/dashboard/document-templates",
-    icon: FileText,
-    visible: (ctx) => has(ctx, "MANAGE_DOCUMENTS"),
-  },
-  {
     label: "Reports",
     href: "/dashboard/reports",
     icon: BarChart3,
@@ -171,8 +165,10 @@ const navItems: NavItem[] = [
     label: "Employee Portal",
     href: "/dashboard/employee-portal",
     icon: UserCheck,
-    // Self-service portal — tied to the EMPLOYEE identity, not a permission.
-    visible: (ctx) => ctx.role === "EMPLOYEE",
+    // Self-service for the EMPLOYEE role; MANAGE_EMPLOYEES holders (Admin/HR)
+    // get the same page with an employee picker to act on someone's behalf
+    // instead of "my own record" (see employee-portal/page.tsx).
+    visible: (ctx) => ctx.role === "EMPLOYEE" || has(ctx, "MANAGE_EMPLOYEES"),
   },
 ];
 

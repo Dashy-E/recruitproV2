@@ -27,6 +27,8 @@ interface CandidateDetail {
   currentStage: string; aiScore: number | null; aiScoreNotes: string | null; resumeUrl: string | null;
   designation: string | null; grade: string | null; location: string | null;
   dateOfJoining: string | null; address: string | null;
+  refNo: string | null; recruitmentEntity: string | null;
+  isFresher: boolean;
   createdAt: string; updatedAt: string;
   mrf: { id: string; title: string; department: { name: string }; orgUnit: { name: string; path: string } | null; designation: { requiresPsychometric: boolean } | null } | null;
   stageHistory: { id: string; fromStage: string | null; toStage: string; notes: string | null; changedAt: string }[];
@@ -39,7 +41,15 @@ interface EditForm {
   firstName: string; lastName: string; email: string; phone: string;
   mrfId: string;
   designation: string; grade: string; location: string; dateOfJoining: string; address: string;
+  refNo: string; recruitmentEntity: string;
+  isFresher: boolean;
 }
+
+const RECRUITMENT_ENTITIES = [
+  "MSK Private Limited",
+  "Primawave Software Private Limited",
+  "Gemini Sampling Solutions Private Limited",
+];
 
 const APPROVAL_BADGE: Record<string, { label: string; icon: React.ElementType; cls: string }> = {
   PENDING: { label: "Pending", icon: Clock, cls: "text-yellow-600 bg-yellow-50" },
@@ -66,18 +76,20 @@ export default function CandidateDetailPage() {
   const passportRef = useRef<HTMLInputElement>(null);
   const [mrfs, setMrfs] = useState<MRFOption[]>([]);
   const [editDialog, setEditDialog] = useState(false);
-  const [editForm, setEditForm] = useState<EditForm>({ firstName: "", lastName: "", email: "", phone: "", mrfId: "", designation: "", grade: "", location: "", dateOfJoining: "", address: "" });
+  const [editForm, setEditForm] = useState<EditForm>({ firstName: "", lastName: "", email: "", phone: "", mrfId: "", designation: "", grade: "", location: "", dateOfJoining: "", address: "", refNo: "", recruitmentEntity: "", isFresher: false });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [deletingResume, setDeletingResume] = useState(false);
   const [addressSourceType, setAddressSourceType] = useState("AADHAAR");
   const [fetchingAddress, setFetchingAddress] = useState(false);
+  const [mrfQuery, setMrfQuery] = useState("");
+  const [showMrfDropdown, setShowMrfDropdown] = useState(false);
   const [offerLetterPreviewOpen, setOfferLetterPreviewOpen] = useState(false);
 
   const canManage = ["ADMIN", "HR"].includes(role);
 
   const fetchCandidate = () => {
-    fetch(`/api/candidates/${id}`)
+    return fetch(`/api/candidates/${id}`)
       .then((r) => r.json())
       .then((d) => { setCandidate(d); setLoading(false); });
   };
@@ -108,7 +120,13 @@ export default function CandidateDetailPage() {
       location: candidate.location ?? "",
       dateOfJoining: candidate.dateOfJoining ? candidate.dateOfJoining.slice(0, 10) : "",
       address: candidate.address ?? "",
+      refNo: candidate.refNo ?? "",
+      recruitmentEntity: candidate.recruitmentEntity ?? "",
+      isFresher: candidate.isFresher,
     });
+    const linkedMrf = candidate.mrf ? mrfs.find((m) => m.id === candidate.mrf!.id) : null;
+    setMrfQuery(linkedMrf ? `${linkedMrf.mrfNumber || linkedMrf.referenceNumber} – ${linkedMrf.title}` : "");
+    setShowMrfDropdown(false);
     setResumeFile(null);
     setEditDialog(true);
   };
@@ -153,6 +171,9 @@ export default function CandidateDetailPage() {
       location: editForm.location || null,
       dateOfJoining: editForm.dateOfJoining || null,
       address: editForm.address || null,
+      refNo: editForm.refNo || null,
+      recruitmentEntity: editForm.recruitmentEntity || null,
+      isFresher: editForm.isFresher,
     };
     // Resume upload/delete are handled by their own endpoints, independent
     // of this general profile PATCH — upload here only if a new file was
@@ -173,7 +194,11 @@ export default function CandidateDetailPage() {
       body: JSON.stringify(payload),
     });
     setResumeFile(null);
-    fetchCandidate();
+    // Awaited so callers (e.g. "Generate offer letter") can rely on
+    // `candidate` state actually reflecting what was just saved before
+    // acting on it — it previously fired-and-forgot here, so the PDF
+    // preview could open against stale data saved a moment too late.
+    await fetchCandidate();
   };
 
   const handleEdit = async () => {
@@ -244,11 +269,19 @@ export default function CandidateDetailPage() {
   if (loading) return <div className="py-20 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin" /></div>;
   if (!candidate) return <div className="py-20 text-center text-gray-500">Candidate not found.</div>;
 
-  const currentStageInfo = CANDIDATE_STAGES.find((s) => s.key === candidate.currentStage);
-  const currentIdx = CANDIDATE_STAGES.findIndex((s) => s.key === candidate.currentStage);
+  // The pipeline shown here follows whatever stages are configured under
+  // Settings -> Workflow Stages when any are defined there, falling back to
+  // the built-in default list otherwise — same fallback rule already used
+  // by the Change Stage dialog below, now shared so the two never disagree.
+  const pipelineStages = workflowStages.length > 0
+    ? workflowStages.slice().sort((a, b) => a.stepOrder - b.stepOrder).map((s) => ({ key: s.key, label: s.label, step: s.stepOrder }))
+    : CANDIDATE_STAGES.map((s) => ({ key: s.key, label: s.label, step: s.step }));
+
+  const currentStageInfo = pipelineStages.find((s) => s.key === candidate.currentStage);
+  const currentIdx = pipelineStages.findIndex((s) => s.key === candidate.currentStage);
   const requiresPsychometric = candidate.mrf?.designation?.requiresPsychometric ?? true;
 
-  const nextStages = CANDIDATE_STAGES.filter((s, idx) => {
+  const nextStages = pipelineStages.filter((s, idx) => {
     if (idx <= currentIdx) return false;
     if (s.key === "PSYCHOMETRIC_TEST" && !requiresPsychometric) return false;
     return true;
@@ -370,7 +403,7 @@ export default function CandidateDetailPage() {
           <CardHeader><CardTitle>Recruitment Pipeline</CardTitle></CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {CANDIDATE_STAGES.map((stage, idx) => {
+              {pipelineStages.map((stage, idx) => {
                 if (stage.key === "PSYCHOMETRIC_TEST" && !requiresPsychometric) {
                   return (
                     <div key={stage.key} className="flex items-center gap-3 opacity-40">
@@ -412,12 +445,12 @@ export default function CandidateDetailPage() {
           ) : (
             <div className="space-y-3">
               {candidate.stageHistory.map((h) => {
-                const toS = CANDIDATE_STAGES.find((s) => s.key === h.toStage);
+                const toS = pipelineStages.find((s) => s.key === h.toStage);
                 return (
                   <div key={h.id} className="flex items-start gap-3 border-l-2 border-gray-200 pl-4 py-1">
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        {h.fromStage && <span className="text-xs text-gray-400">{CANDIDATE_STAGES.find((s) => s.key === h.fromStage)?.label}</span>}
+                        {h.fromStage && <span className="text-xs text-gray-400">{pipelineStages.find((s) => s.key === h.fromStage)?.label}</span>}
                         {h.fromStage && <ChevronRight className="h-3 w-3 text-gray-400" />}
                         <span className="text-sm font-medium text-gray-900">{toS?.label || h.toStage}</span>
                       </div>
@@ -540,17 +573,52 @@ export default function CandidateDetailPage() {
               <Label>Phone</Label>
               <Input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} placeholder="Optional" />
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 relative">
               <Label>Linked MRF</Label>
-              <Select value={editForm.mrfId} onValueChange={(v) => setEditForm({ ...editForm, mrfId: v })}>
-                <SelectTrigger><SelectValue placeholder="Select MRF" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— None (unlink) —</SelectItem>
-                  {mrfs.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.mrfNumber || m.referenceNumber} – {m.title}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input
+                value={mrfQuery}
+                onChange={(e) => {
+                  setMrfQuery(e.target.value);
+                  setShowMrfDropdown(true);
+                  if (!e.target.value.trim()) setEditForm({ ...editForm, mrfId: "none" });
+                }}
+                onFocus={(e) => { setShowMrfDropdown(true); e.target.select(); }}
+                onBlur={() => setTimeout(() => setShowMrfDropdown(false), 150)}
+                placeholder="Search MRF by title or number..."
+                autoComplete="off"
+              />
+              {showMrfDropdown && (() => {
+                const q = mrfQuery.trim().toLowerCase();
+                const filteredMrfs = q
+                  ? mrfs.filter((m) => `${m.title} ${m.referenceNumber} ${m.mrfNumber || ""}`.toLowerCase().includes(q))
+                  : mrfs;
+                return (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-56 overflow-y-auto">
+                    <button
+                      type="button"
+                      className="w-full px-3 py-2 text-left text-sm text-gray-500 hover:bg-blue-50"
+                      onMouseDown={() => { setEditForm({ ...editForm, mrfId: "none" }); setMrfQuery(""); setShowMrfDropdown(false); }}
+                    >
+                      — None (unlink) —
+                    </button>
+                    {filteredMrfs.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50"
+                        onMouseDown={() => {
+                          setEditForm({ ...editForm, mrfId: m.id });
+                          setMrfQuery(`${m.mrfNumber || m.referenceNumber} – ${m.title}`);
+                          setShowMrfDropdown(false);
+                        }}
+                      >
+                        {m.mrfNumber || m.referenceNumber} – {m.title}
+                      </button>
+                    ))}
+                    {filteredMrfs.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">No matching MRFs</p>}
+                  </div>
+                );
+              })()}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
@@ -591,6 +659,32 @@ export default function CandidateDetailPage() {
               </div>
               <Textarea rows={2} value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} placeholder="Full address" />
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Ref. No.</Label>
+                <Input value={editForm.refNo} onChange={(e) => setEditForm({ ...editForm, refNo: e.target.value })} placeholder="e.g. C/2026-27/HR/746" />
+              </div>
+              <div className="space-y-1">
+                <Label>Recruitment For</Label>
+                <Select value={editForm.recruitmentEntity} onValueChange={(v) => setEditForm({ ...editForm, recruitmentEntity: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select entity" /></SelectTrigger>
+                  <SelectContent>
+                    {RECRUITMENT_ENTITIES.map((entity) => (
+                      <SelectItem key={entity} value={entity}>{entity}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={editForm.isFresher}
+                onChange={(e) => setEditForm({ ...editForm, isFresher: e.target.checked })}
+                className="h-4 w-4"
+              />
+              <span className="text-sm">Is Fresher</span>
+            </label>
             <div className="space-y-1">
               <Label>Resume</Label>
               {candidate.resumeUrl ? (
@@ -638,7 +732,16 @@ export default function CandidateDetailPage() {
       </Dialog>
 
       {/* Offer Letter PDF Preview */}
-      <Dialog open={offerLetterPreviewOpen} onOpenChange={setOfferLetterPreviewOpen}>
+      <Dialog
+        open={offerLetterPreviewOpen}
+        onOpenChange={(open) => {
+          setOfferLetterPreviewOpen(open);
+          // Closing the preview (X, Escape, outside click) returns to Edit
+          // Candidate Details rather than dropping back to the plain detail
+          // page, since that's where this preview was generated from.
+          if (!open) setEditDialog(true);
+        }}
+      >
         <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>Offer Letter</DialogTitle>
@@ -652,6 +755,9 @@ export default function CandidateDetailPage() {
               location: candidate.location,
               dateOfJoining: candidate.dateOfJoining,
               address: candidate.address,
+              refNo: candidate.refNo,
+              recruitmentEntity: candidate.recruitmentEntity,
+              isFresher: candidate.isFresher,
             }}
           />
         </DialogContent>

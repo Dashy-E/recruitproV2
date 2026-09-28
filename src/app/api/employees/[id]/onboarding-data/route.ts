@@ -53,10 +53,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const existing = await db("RECRUIT_T_EmployeeOnboardingData").where({ employeeId: id }).first();
   let record;
   if (existing) {
-    [record] = await db("RECRUIT_T_EmployeeOnboardingData")
-      .where({ employeeId: id })
-      .update({ formData: formDataJson, updatedAt: now })
-      .returning("*");
+    // NOTE: .returning("*") on this UPDATE hits an Oracle/oracledb bind-count
+    // mismatch (NJS-098) — same fix as the MRF/Candidate/Employee PATCH
+    // routes. Plain update + re-select sidesteps it.
+    await db("RECRUIT_T_EmployeeOnboardingData").where({ employeeId: id }).update({ formData: formDataJson, updatedAt: now });
+    record = await db("RECRUIT_T_EmployeeOnboardingData").where({ employeeId: id }).first();
   } else {
     [record] = await db("RECRUIT_T_EmployeeOnboardingData")
       .insert({ id: newId(), employeeId: id, formData: formDataJson, submittedAt: now, updatedAt: now })

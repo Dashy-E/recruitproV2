@@ -8,7 +8,7 @@ import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 import { getSignedFileUrl } from "@/lib/s3";
 import bcrypt from "bcryptjs";
 
-const CANDIDATE_BOOLEAN_FIELDS = ["isActive"];
+const CANDIDATE_BOOLEAN_FIELDS = ["isActive", "isFresher"];
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -92,6 +92,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   return NextResponse.json({
     ...candidate,
     isActive: fromBool(candidate.isActive),
+    isFresher: fromBool(candidate.isFresher),
     resumeUrl: await getSignedFileUrl(candidate.resumeUrl),
     user,
     mrf,
