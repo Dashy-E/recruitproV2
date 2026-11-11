@@ -10,9 +10,17 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Loader2, UserCheck, Pencil } from "lucide-react";
+import { Plus, Loader2, UserCheck, Pencil, Lock } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { OrgUnitPicker, OrgTreeNode, buildOrgTree } from "@/components/org-unit-picker";
+
+// Mirrors src/lib/protected-user.ts (that module imports the DB, so it
+// can't be pulled into this client component). The API enforces the rule;
+// this just hides the Edit button.
+const PROTECTED_USER_NAME = "System Admin";
+const SUPER_ADMIN_USERNAME = "admin";
+const isProtectedUser = (u: { name?: string | null }) =>
+  (u.name ?? "").trim().toLowerCase() === PROTECTED_USER_NAME.toLowerCase();
 
 interface User {
   id: string; name: string; userName: string; email: string; role: string; isActive: boolean; createdAt: string;
@@ -227,7 +235,11 @@ export default function UsersPage() {
     fetchUsers();
   };
 
-  const editPasswordsMatch = editForm.password === editForm.confirmPassword;
+  // The logged-in user's own row tells us their userName (not on the session).
+  const myId = (session?.user as { id?: string })?.id;
+  const isSuperAdmin = users.find((u) => u.id === myId)?.userName === SUPER_ADMIN_USERNAME;
+
+  const editPasswordsMatch =editForm.password === editForm.confirmPassword;
 
   const needsDept = form.userRole === "FUNCTIONAL_HEAD";
   const needsOrgUnit = form.userRole === "BRANCH_MANAGER";
@@ -378,9 +390,16 @@ export default function UsersPage() {
                     </TableCell>
                     <TableCell className="text-sm text-gray-500">{formatDate(u.createdAt)}</TableCell>
                     <TableCell>
-                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => openEdit(u)}>
-                        <Pencil className="h-3.5 w-3.5 text-gray-400" />
-                      </Button>
+                      {isProtectedUser(u) && !isSuperAdmin ? (
+                        <span title={`Only the "${SUPER_ADMIN_USERNAME}" user can edit ${PROTECTED_USER_NAME}`}
+                          className="inline-flex h-8 w-8 items-center justify-center">
+                          <Lock className="h-3.5 w-3.5 text-gray-300" />
+                        </span>
+                      ) : (
+                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => openEdit(u)}>
+                          <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

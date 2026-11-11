@@ -14,7 +14,13 @@ const s3 = globalForS3.s3Client ??= new S3Client({
 });
 
 export async function uploadToS3(key: string, body: Buffer, contentType: string): Promise<void> {
-  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType }));
+  await s3.send(new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+    ACL: "public-read",
+  }));
 }
 
 export async function deleteFromS3(key: string): Promise<void> {

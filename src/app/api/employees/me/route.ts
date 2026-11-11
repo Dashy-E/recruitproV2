@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getSignedFileUrl } from "@/lib/s3";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -39,10 +40,14 @@ export async function GET() {
     };
   }
 
-  const documents = await db("RECRUIT_T_Document")
+  const documentsRaw = await db("RECRUIT_T_Document")
     .where({ candidateId: candidate.id })
     .select("id", "name", "fileUrl", "fileType", "fileSize", "documentType", "approvalStatus", "extractedData", "createdAt")
     .orderBy("createdAt", "desc");
+  // fileUrl is stored as a bare S3 key (private bucket) — sign it for viewing.
+  const documents = await Promise.all(
+    documentsRaw.map(async (d: any) => ({ ...d, fileUrl: await getSignedFileUrl(d.fileUrl) }))
+  );
 
   return NextResponse.json({ employee, documents });
 }

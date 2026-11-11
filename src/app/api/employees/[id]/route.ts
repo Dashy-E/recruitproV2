@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
+import { getSignedFileUrl } from "@/lib/s3";
 import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 
 // Mirrors /api/employees/me's response shape, but by explicit employee id —
@@ -53,10 +54,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       : null,
   };
 
-  const documents = await db("RECRUIT_T_Document")
+  const documentsRaw = await db("RECRUIT_T_Document")
     .where({ candidateId: employeeRow.candidateId })
     .select("id", "name", "fileUrl", "fileType", "fileSize", "documentType", "approvalStatus", "extractedData", "createdAt")
     .orderBy("createdAt", "desc");
+  // fileUrl is stored as a bare S3 key (private bucket) — sign it for viewing.
+  const documents = await Promise.all(
+    documentsRaw.map(async (d: any) => ({ ...d, fileUrl: await getSignedFileUrl(d.fileUrl) }))
+  );
 
   return NextResponse.json({ employee, documents });
 }

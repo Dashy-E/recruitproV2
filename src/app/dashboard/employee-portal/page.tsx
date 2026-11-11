@@ -377,11 +377,11 @@ export default function EmployeePortalPage() {
   };
 
   const handleChecklistUpload = async (e: React.ChangeEvent<HTMLInputElement>, docKey: string) => {
-    const file = e.target.files?.[0];
-    if (!file || !employee) return;
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length || !employee) return;
     setUploading(docKey);
     const fd = new FormData();
-    fd.append("file", file);
+    for (const file of files) fd.append("file", file);
     fd.append("candidateId", employee.candidate.id);
     fd.append("documentType", docKey);
     const res = await fetch("/api/documents", { method: "POST", body: fd });
@@ -813,7 +813,7 @@ export default function EmployeePortalPage() {
                           onClick={() => { setPendingUploadKey(item.key); fileInputRef.current?.click(); }}
                         >
                           {isUploading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Upload className="h-3 w-3 mr-1" />}
-                          {uploaded.length > 0 ? "Re-upload" : "Upload"}
+                          {uploaded.length > 0 ? "Upload more" : "Upload"}
                         </Button>
                       </div>
                     </div>
@@ -821,6 +821,18 @@ export default function EmployeePortalPage() {
                       <div className="ml-6 space-y-2">
                         {uploaded.map((doc) => (
                           <div key={doc.id} className="space-y-1">
+                            {doc.fileUrl && (doc.fileType?.startsWith("image/") || /\.(jpe?g|png|gif|webp)$/i.test(doc.name)) && (
+                              <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" className="inline-block">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={doc.fileUrl} alt={doc.name} className="h-20 w-auto max-w-[10rem] rounded border object-cover" />
+                              </a>
+                            )}
+                            {doc.fileUrl && (doc.fileType === "application/pdf" || /\.pdf$/i.test(doc.name)) && (
+                              <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 rounded border bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100">
+                                <FileText className="h-3 w-3" /> View PDF
+                              </a>
+                            )}
                             <div className="flex items-center gap-2 text-xs text-gray-500">
                               <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate max-w-xs">
                                 {doc.name}
@@ -853,11 +865,12 @@ export default function EmployeePortalPage() {
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 className="hidden"
                 accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
                 onChange={(e) => pendingUploadKey ? handleChecklistUpload(e, pendingUploadKey) : undefined}
               />
-              <p className="text-xs text-gray-400 pt-1">Accepted formats: PDF, DOC, JPG, PNG</p>
+              <p className="text-xs text-gray-400 pt-1">Accepted formats: PDF, DOC, JPG, PNG · You can select multiple files at once</p>
             </CardContent>
           </Card>
         );

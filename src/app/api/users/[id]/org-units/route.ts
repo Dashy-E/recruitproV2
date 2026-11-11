@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
+import { guardProtectedUser } from "@/lib/protected-user";
 
 async function requireAdmin() {
   const session = await getServerSession(authOptions);
@@ -40,6 +41,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const user = await db("RECRUIT_T_User").where({ id }).first();
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  const locked = await guardProtectedUser(session, user);
+  if (locked) return locked;
 
   const { orgUnitIds } = await req.json();
   if (!Array.isArray(orgUnitIds)) return NextResponse.json({ error: "orgUnitIds must be an array" }, { status: 400 });

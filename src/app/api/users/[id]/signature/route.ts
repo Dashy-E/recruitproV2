@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { hasPermission } from "@/lib/permissions";
 import { uploadToS3, deleteFromS3, getSignedFileUrl } from "@/lib/s3";
+import { guardProtectedUser } from "@/lib/protected-user";
 
 const ALLOWED_MIME_TYPES = ["image/png", "image/jpeg"];
 const ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg"];
@@ -22,6 +23,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const target = await db("RECRUIT_T_User").where({ id }).first();
   if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  const locked = await guardProtectedUser(session, target);
+  if (locked) return locked;
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
@@ -62,6 +66,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
   const target = await db("RECRUIT_T_User").where({ id }).first();
   if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  const locked = await guardProtectedUser(session, target);
+  if (locked) return locked;
 
   const existingKey = target.signatureUrl as string | null;
   if (!existingKey) return NextResponse.json({ error: "No signature to delete" }, { status: 400 });

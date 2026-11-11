@@ -6,6 +6,7 @@ import { toBool, fromBool } from "@/lib/db-bool";
 import { hasPermission } from "@/lib/permissions";
 import { getAllOrgUnits, getAncestorPath } from "@/lib/org-access";
 import { newId } from "@/lib/id";
+import { guardProtectedUser } from "@/lib/protected-user";
 import bcrypt from "bcryptjs";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -27,6 +28,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const target = await db("RECRUIT_T_User").where({ id }).first();
   if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  const locked = await guardProtectedUser(session, target);
+  if (locked) return locked;
 
   // Only ADMIN can edit other ADMINs or change someone's role to ADMIN
   if (target.role === "ADMIN" && myRole !== "ADMIN") {
